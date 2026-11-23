@@ -104,7 +104,7 @@
   "native": {
     "interval": 2,
     "portPath": "",
-    "responseTimeout": 1500
+    "responseTimeout": 5000
   },
   "objects": [],
   "instanceObjects": []

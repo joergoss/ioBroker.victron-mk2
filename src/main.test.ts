@@ -91,12 +91,20 @@ describe("adapter lifecycle", () => {
 		expect(adapter.subscriptions).to.have.length(0);
 	});
 
-	it("starts with connection=false and only then starts the loop (issue #58)", async () => {
+	it("starts with connection=false and only then starts the loop (issues #58, #79)", async () => {
 		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
 		await adapter.handlers.ready();
 		expect(adapter.states["info.connection"].val).to.equal(false);
 		expect(adapter.pollLoop).to.not.equal(undefined);
+		expect(adapter.mk2.conn.responseTimeoutMs).to.equal(5000);
 		expect(adapter.subscriptions).to.deep.equal(["control.*"]);
+		await adapter.handlers.unload(() => undefined);
+	});
+
+	it("keeps an explicitly configured response timeout (issue #79)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600, responseTimeout: 2750 });
+		await adapter.handlers.ready();
+		expect(adapter.mk2.conn.responseTimeoutMs).to.equal(2750);
 		await adapter.handlers.unload(() => undefined);
 	});
 

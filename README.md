@@ -60,7 +60,7 @@ change after a reboot.
 | --- | --- | --- |
 | `portPath` | – | Serial port of the MK2-USB/MK3-USB interface. |
 | `interval` | `2` | Seconds between two complete polls. A poll that takes longer than the interval is followed immediately by the next one. |
-| `responseTimeout` | `1500` | Maximum wait time in milliseconds for one MK2 frame. The protocol recommends 500 ms; busy hosts may need more. |
+| `responseTimeout` | `5000` | Maximum wait time in milliseconds for one MK2 frame. The protocol recommends 500 ms; long MK2 frames and busy hosts need more headroom. |
 
 The adapter opens the port with **2400 baud** and sets DTR as required by the
 MK2 protocol.

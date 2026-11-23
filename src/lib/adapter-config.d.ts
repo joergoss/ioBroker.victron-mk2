@@ -6,7 +6,7 @@ declare global {
 		interface AdapterConfig {
 			interval: number;
 			portPath: string;
-			/** Optional response budget per MK2 frame in ms (default 1500). */
+			/** Optional response budget per MK2 frame in ms (default 5000). */
 			responseTimeout?: number;
 		}
 	}
