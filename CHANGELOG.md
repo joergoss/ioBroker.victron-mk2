@@ -68,7 +68,9 @@ and evidence: `docs/audit-round4-2026-11-18.md`.
   skipped when the poll failed, and resets rejected/expired command states to
   the device value instead of leaving the requested value visible.
 - **Connection state**: `info.connection` has a single writer and a failed full
-  poll can no longer be masked by a direct `true`.
+  poll can no longer be masked by a direct `true`. A failed poll now also
+  updates the state through the model, so the next successful poll publishes
+  `true` again instead of leaving the state stuck at `false` (issue #77).
 - **Settings**: `fmains`/`finv` publish 0 instead of `Infinity` for a raw period
   of 0; phase 5–7 (L4/L3/L2) is accepted; factor 0 publishes unknown currents;
   setting 63 applies its 0x8000 bias; long/short setting-info discrimination is

@@ -173,4 +173,42 @@ describe("adapter lifecycle", () => {
 		expect(adapter.pollLoop).to.equal(first);
 		await adapter.handlers.unload(() => undefined);
 	});
+
+	it("publishes reconnection after a recovered state-only poll failure (issue #77)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const model: Record<string, any> = {
+			"info.connection": { value: false },
+			"info.address": { value: 0 },
+			"state.state": { value: 80 },
+			"state.substate": { value: 0 },
+			"assist.maxlimit": { value: null },
+			"diag.timeouts": { value: 0 },
+			"diag.checksum_errors": { value: 0 },
+			"diag.last_error": { value: "" },
+		};
+		let failStatePoll = false;
+		adapter.mk2 = {
+			conn: { timeouts: 0, checksumErrors: 0, lastError: "" },
+			mk2Model: model,
+			pollStateOnly: async () => {
+				if (failStatePoll) throw new Error("state poll timeout");
+				model["info.connection"].value = true;
+			},
+			poll: async () => {
+				model["info.connection"].value = true;
+			},
+		};
+		adapter.toSendQueue = [];
+
+		await adapter.updateStates();
+		expect(adapter.states["info.connection"].val).to.equal(true);
+
+		failStatePoll = true;
+		await adapter.updateStates();
+		expect(adapter.states["info.connection"].val).to.equal(false);
+
+		failStatePoll = false;
+		await adapter.updateStates();
+		expect(adapter.states["info.connection"].val).to.equal(true);
+	});
 });
