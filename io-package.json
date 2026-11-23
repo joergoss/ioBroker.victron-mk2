@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "victron-mk2",
-    "version": "0.4.1",
+    "version": "0.4.2",
     "news": {
+      "0.4.2": {
+        "en": "Use 5000 ms as the default MK2 response timeout; custom values remain unchanged (#79)",
+        "de": "5000 ms als Standard für den MK2-Antwort-Timeout; benutzerdefinierte Werte bleiben unverändert (#79)",
+        "ru": "Тайм-аут ответа MK2 по умолчанию теперь 5000 мс; пользовательские значения сохраняются (#79)",
+        "pt": "Usar 5000 ms como tempo limite de resposta MK2 padrão; valores personalizados permanecem inalterados (#79)",
+        "nl": "5000 ms als standaard MK2-antwoordtime-out; aangepaste waarden blijven ongewijzigd (#79)",
+        "fr": "Utiliser 5000 ms comme délai de réponse MK2 par défaut ; les valeurs personnalisées restent inchangées (#79)",
+        "it": "Usa 5000 ms come timeout di risposta MK2 predefinito; i valori personalizzati restano invariati (#79)",
+        "es": "Usar 5000 ms como tiempo de espera de respuesta MK2 predeterminado; los valores personalizados no cambian (#79)",
+        "pl": "Domyślny limit odpowiedzi MK2 wynosi teraz 5000 ms; wartości niestandardowe pozostają bez zmian (#79)",
+        "uk": "Типовий тайм-аут відповіді MK2 тепер 5000 мс; користувацькі значення не змінюються (#79)",
+        "zh-cn": "默认 MK2 响应超时改为 5000 ms；自定义值保持不变 (#79)"
+      },
       "0.4.1": {
         "en": "Fix connection-state recovery after an isolated MK2 poll timeout (#77)",
         "de": "Verbindungsstatus nach einem einzelnen MK2-Poll-Timeout wieder korrekt auf true setzen (#77)",
