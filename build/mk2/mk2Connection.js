@@ -76,8 +76,8 @@ class Mk2Connection {
         /**
          * Response budget per frame. Protocol §3.3 recommends 500 ms, but long MK2
          * frames and a busy host (ioBroker on a Raspberry Pi) need more headroom.
-         * 5000 ms has proven reliable on firmware 1909209; the F5 response gets its
-         * own longer budget either way.
+         * 5000 ms has proven reliable on firmware 1909209. The F5 request path has
+         * its own fixed 2000 ms compatibility budget.
          */
         this.responseTimeoutMs = 5000;
         /** Receive accumulator; bytes after a complete frame stay for the next read. */
@@ -287,7 +287,8 @@ class Mk2Connection {
      * Read one complete length-prefixed frame, with timeout and checksum
      * validation. Partial reads are accumulated until the whole frame arrived.
      * The default follows the configured response budget (protocol §3.3 names
-     * 500 ms; a busy host may need more). F5 gets a longer budget either way.
+     * 500 ms; a busy host may need more). Callers may provide a different
+     * per-request budget.
      */
     async receiveFrame(timeoutMs = this.responseTimeoutMs) {
         const deadline = Date.now() + timeoutMs;
