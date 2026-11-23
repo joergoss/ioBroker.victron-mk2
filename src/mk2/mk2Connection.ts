@@ -42,11 +42,12 @@ export class Mk2Connection {
 	/** Incremented on every successful sync, so clients can drop stale caches. */
 	generation = 0;
 	/**
-	 * Response budget per frame. Protocol §3.3 recommends 500 ms, but on a busy
-	 * host (ioBroker on a Raspberry Pi) 1500 ms has proven reliable; the F5
-	 * response gets its own longer budget either way.
+	 * Response budget per frame. Protocol §3.3 recommends 500 ms, but long MK2
+	 * frames and a busy host (ioBroker on a Raspberry Pi) need more headroom.
+	 * 5000 ms has proven reliable on firmware 1909209; the F5 response gets its
+	 * own longer budget either way.
 	 */
-	responseTimeoutMs = 1500;
+	responseTimeoutMs = 5000;
 	/** Receive accumulator; bytes after a complete frame stay for the next read. */
 	private rxBuffer = Buffer.alloc(0);
 

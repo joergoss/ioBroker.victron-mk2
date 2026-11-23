@@ -16,6 +16,11 @@ function connWith(fake: FakeMk2Serial): Mk2Connection {
 }
 
 describe("Mk2Connection", () => {
+	it("uses the 5000 ms response budget by default (issue #79)", () => {
+		const conn = connWith(new FakeMk2Serial());
+		expect(conn.responseTimeoutMs).to.equal(5000);
+	});
+
 	describe("receiveFrame", () => {
 		it("reads a complete length-prefixed frame", async () => {
 			const fake = new FakeMk2Serial();
@@ -209,6 +214,7 @@ describe("Mk2Connection", () => {
 			const fake = new FakeMk2Serial(() => null);
 			fake.push(versionFrame());
 			const conn = connWith(fake);
+			conn.responseTimeoutMs = 40; // keep this failure-path test independent of the production default
 			await expect(
 				conn.communicate(mk2Frame(0x41, [0x01, 0x00]), async () => undefined),
 			).to.be.rejectedWith("Timeout");

@@ -2,6 +2,14 @@
 
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+## __WORK IN PROGRESS__
+
+### Changed
+
+- The default MK2 response timeout is now **5000 ms**, matching the value proven
+  with long frames on firmware 1909209 and busy Raspberry Pi hosts. Explicitly
+  configured timeout values are preserved (issue #79).
+
 ## 0.4.1 (2026-11-23)
 
 ### Fixed

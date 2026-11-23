@@ -63,6 +63,7 @@
             "help": "responseTimeoutHelp",
             "min": 250,
             "max": 10000,
+            "default": 5000,
             "step": 50,
             "unit": "ms",
             "newLine": true,
