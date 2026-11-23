@@ -246,13 +246,18 @@ class VictronMk2 extends utils.Adapter {
 			// JSON.stringify(Error) yields "{}", so log the message and stack.
 			const message = Exception instanceof Error ? (Exception.stack ?? Exception.message) : JSON.stringify(Exception);
 			this.log.error("ERROR updateStates : " + message);
-			// Publish the lost connection as a state, not only as a log line.
+			// Keep the model as the single source of truth. A direct setState(false)
+			// without updating the model would be skipped by the change detection on
+			// the next successful poll, leaving info.connection stuck at false (#77).
 			try {
-				await this.setStateAsync("info.connection", { val: false, ack: true });
 				if (this.mk2) {
+					this.mk2.mk2Model["info.connection"].value = false;
+					await this.publishStates(["info.connection"]);
 					await this.setStateAsync("diag.timeouts", { val: this.mk2.conn.timeouts, ack: true });
 					await this.setStateAsync("diag.checksum_errors", { val: this.mk2.conn.checksumErrors, ack: true });
 					await this.setStateAsync("diag.last_error", { val: this.mk2.conn.lastError, ack: true });
+				} else {
+					await this.setStateAsync("info.connection", { val: false, ack: true });
 				}
 			} catch {
 				// ignore secondary state errors while handling a failure
