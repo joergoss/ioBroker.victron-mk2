@@ -1,98 +1,111 @@
 {
-    "common": {
-        "name": "victron-mk2",
-        "version": "0.4.0",
-        "news": {
-            "0.4.0": {
-                "en": "Admin 5+ JSON configuration, updated serial and runtime dependencies, CI on Node.js 22/24/26 and publication preparation",
-                "de": "Admin-5+-JSON-Konfiguration, aktualisierte Serial- und Laufzeit-Abhängigkeiten, CI auf Node.js 22/24/26 und Vorbereitung der Veröffentlichung",
-                "ru": "JSON-конфигурация Admin 5+, обновлённые зависимости serial и среды выполнения, CI на Node.js 22/24/26 и подготовка к публикации",
-                "pt": "Configuração JSON do Admin 5+, dependências de serial e runtime atualizadas, CI em Node.js 22/24/26 e preparação para publicação",
-                "nl": "Admin 5+-JSON-configuratie, bijgewerkte serial- en runtime-afhankelijkheden, CI op Node.js 22/24/26 en voorbereiding van de publicatie",
-                "fr": "Configuration JSON Admin 5+, dépendances serial et runtime mises à jour, CI sur Node.js 22/24/26 et préparation de la publication",
-                "it": "Configurazione JSON di Admin 5+, dipendenze serial e runtime aggiornate, CI su Node.js 22/24/26 e preparazione alla pubblicazione",
-                "es": "Configuración JSON de Admin 5+, dependencias de serial y runtime actualizadas, CI en Node.js 22/24/26 y preparación de la publicación",
-                "pl": "Konfiguracja JSON Admin 5+, zaktualizowane zależności serial i środowiska uruchomieniowego, CI na Node.js 22/24/26 i przygotowanie do publikacji",
-                "uk": "JSON-конфігурація Admin 5+, оновлені залежності serial і середовища виконання, CI на Node.js 22/24/26 та підготовка до публікації",
-                "zh-cn": "Admin 5+ JSON 配置、更新串口与运行时依赖、基于 Node.js 22/24/26 的 CI，以及发布准备"
-            }
-        },
-        "titleLang": {
-            "en": "Victron MK2",
-            "de": "Victron MK2",
-            "ru": "Victron MK2",
-            "pt": "Victron MK2",
-            "nl": "Victron MK2",
-            "fr": "Victron MK2",
-            "it": "Victron MK2",
-            "es": "Victron MK2",
-            "pl": "Victron MK2",
-            "uk": "Victron MK2",
-            "zh-cn": "Victron MK2"
-        },
-        "desc": {
-            "en": "Victron MultiPlus/Quattro inverter/chargers via MK2-USB or MK3-USB (VE.Bus): telemetry, limits, modes, settings and diagnostics",
-            "de": "Victron MultiPlus/Quattro Wechselrichter/Ladegeräte über MK2-USB oder MK3-USB (VE.Bus): Telemetrie, Limits, Modi, Einstellungen und Diagnose",
-            "ru": "Инверторы/зарядные устройства Victron MultiPlus/Quattro через MK2-USB или MK3-USB (VE.Bus): телеметрия, ограничения, режимы, настройки и диагностика",
-            "pt": "Inversores/carregadores Victron MultiPlus/Quattro via MK2-USB ou MK3-USB (VE.Bus): telemetria, limites, modos, definições e diagnóstico",
-            "nl": "Victron MultiPlus/Quattro omvormer/laders via MK2-USB of MK3-USB (VE.Bus): telemetrie, limieten, modi, instellingen en diagnostiek",
-            "fr": "Onduleurs/chargeurs Victron MultiPlus/Quattro via MK2-USB ou MK3-USB (VE.Bus) : télémétrie, limites, modes, réglages et diagnostic",
-            "it": "Inverter/caricabatterie Victron MultiPlus/Quattro tramite MK2-USB o MK3-USB (VE.Bus): telemetria, limiti, modalità, impostazioni e diagnostica",
-            "es": "Inversores/cargadores Victron MultiPlus/Quattro mediante MK2-USB o MK3-USB (VE.Bus): telemetría, límites, modos, ajustes y diagnóstico",
-            "pl": "Inwertery/ładowarki Victron MultiPlus/Quattro przez MK2-USB lub MK3-USB (VE.Bus): telemetria, limity, tryby, ustawienia i diagnostyka",
-            "uk": "Інвертори/зарядні пристрої Victron MultiPlus/Quattro через MK2-USB або MK3-USB (VE.Bus): телеметрія, обмеження, режими, налаштування та діагностика",
-            "zh-cn": "通过 MK2-USB 或 MK3-USB（VE.Bus）连接 Victron MultiPlus/Quattro 逆变器/充电器：遥测、限制、模式、设置和诊断"
-        },
-        "authors": [
-            "joergoss <joerg.oss@gmx.de> (https://github.com/joergoss)"
-        ],
-        "keywords": [
-            "victron",
-            "ve.bus",
-            "mk2",
-            "mk3",
-            "multiplus",
-            "quattro",
-            "inverter",
-            "charger",
-            "energy"
-        ],
-        "licenseInformation": {
-            "type": "free",
-            "license": "MIT"
-        },
-        "tier": 3,
-        "platform": "Javascript/Node.js",
-        "icon": "victron-mk2.png",
-        "enabled": true,
-        "extIcon": "https://raw.githubusercontent.com/joergoss/ioBroker.victron-mk2/master/admin/victron-mk2.png",
-        "readme": "https://github.com/joergoss/ioBroker.victron-mk2/blob/master/README.md",
-        "loglevel": "info",
-        "mode": "daemon",
-        "type": "energy",
-        "compact": true,
-        "connectionType": "local",
-        "dataSource": "poll",
-        "supportCustoms": true,
-        "adminUI": {
-            "config": "json"
-        },
-        "dependencies": [
-            {
-                "js-controller": ">=6.0.11"
-            }
-        ],
-        "globalDependencies": [
-            {
-                "admin": ">=7.7.22"
-            }
-        ]
+  "common": {
+    "name": "victron-mk2",
+    "version": "0.4.1",
+    "news": {
+      "0.4.1": {
+        "en": "Fix connection-state recovery after an isolated MK2 poll timeout (#77)",
+        "de": "Verbindungsstatus nach einem einzelnen MK2-Poll-Timeout wieder korrekt auf true setzen (#77)",
+        "ru": "Корректное восстановление состояния подключения после одиночного тайм-аута опроса MK2 (#77)",
+        "pt": "Restaurar corretamente o estado da ligação após um único tempo limite de consulta MK2 (#77)",
+        "nl": "Herstel de verbindingsstatus correct na een enkele MK2-polling-time-out (#77)",
+        "fr": "Rétablir correctement l’état de connexion après un seul délai d’attente d’interrogation MK2 (#77)",
+        "it": "Ripristina correttamente lo stato della connessione dopo un singolo timeout del polling MK2 (#77)",
+        "es": "Restaura correctamente el estado de conexión tras un único tiempo de espera de sondeo MK2 (#77)",
+        "pl": "Przywracaj prawidłowy stan połączenia po pojedynczym przekroczeniu czasu odpytywania MK2 (#77)",
+        "uk": "Коректно відновлювати стан підключення після одиничного тайм-ауту опитування MK2 (#77)",
+        "zh-cn": "在单次 MK2 轮询超时后正确恢复连接状态 (#77)"
+      },
+      "0.4.0": {
+        "en": "Admin 5+ JSON configuration, updated serial and runtime dependencies, CI on Node.js 22/24/26 and publication preparation",
+        "de": "Admin-5+-JSON-Konfiguration, aktualisierte Serial- und Laufzeit-Abhängigkeiten, CI auf Node.js 22/24/26 und Vorbereitung der Veröffentlichung",
+        "ru": "JSON-конфигурация Admin 5+, обновлённые зависимости serial и среды выполнения, CI на Node.js 22/24/26 и подготовка к публикации",
+        "pt": "Configuração JSON do Admin 5+, dependências de serial e runtime atualizadas, CI em Node.js 22/24/26 e preparação para publicação",
+        "nl": "Admin 5+-JSON-configuratie, bijgewerkte serial- en runtime-afhankelijkheden, CI op Node.js 22/24/26 en voorbereiding van de publicatie",
+        "fr": "Configuration JSON Admin 5+, dépendances serial et runtime mises à jour, CI sur Node.js 22/24/26 et préparation de la publication",
+        "it": "Configurazione JSON di Admin 5+, dipendenze serial e runtime aggiornate, CI su Node.js 22/24/26 e preparazione alla pubblicazione",
+        "es": "Configuración JSON de Admin 5+, dependencias de serial y runtime actualizadas, CI en Node.js 22/24/26 y preparación de la publicación",
+        "pl": "Konfiguracja JSON Admin 5+, zaktualizowane zależności serial i środowiska uruchomieniowego, CI na Node.js 22/24/26 i przygotowanie do publikacji",
+        "uk": "JSON-конфігурація Admin 5+, оновлені залежності serial і середовища виконання, CI на Node.js 22/24/26 та підготовка до публікації",
+        "zh-cn": "Admin 5+ JSON 配置、更新串口与运行时依赖、基于 Node.js 22/24/26 的 CI，以及发布准备"
+      }
     },
-    "native": {
-        "interval": 2,
-        "portPath": "",
-        "responseTimeout": 1500
+    "titleLang": {
+      "en": "Victron MK2",
+      "de": "Victron MK2",
+      "ru": "Victron MK2",
+      "pt": "Victron MK2",
+      "nl": "Victron MK2",
+      "fr": "Victron MK2",
+      "it": "Victron MK2",
+      "es": "Victron MK2",
+      "pl": "Victron MK2",
+      "uk": "Victron MK2",
+      "zh-cn": "Victron MK2"
     },
-    "objects": [],
-    "instanceObjects": []
+    "desc": {
+      "en": "Victron MultiPlus/Quattro inverter/chargers via MK2-USB or MK3-USB (VE.Bus): telemetry, limits, modes, settings and diagnostics",
+      "de": "Victron MultiPlus/Quattro Wechselrichter/Ladegeräte über MK2-USB oder MK3-USB (VE.Bus): Telemetrie, Limits, Modi, Einstellungen und Diagnose",
+      "ru": "Инверторы/зарядные устройства Victron MultiPlus/Quattro через MK2-USB или MK3-USB (VE.Bus): телеметрия, ограничения, режимы, настройки и диагностика",
+      "pt": "Inversores/carregadores Victron MultiPlus/Quattro via MK2-USB ou MK3-USB (VE.Bus): telemetria, limites, modos, definições e diagnóstico",
+      "nl": "Victron MultiPlus/Quattro omvormer/laders via MK2-USB of MK3-USB (VE.Bus): telemetrie, limieten, modi, instellingen en diagnostiek",
+      "fr": "Onduleurs/chargeurs Victron MultiPlus/Quattro via MK2-USB ou MK3-USB (VE.Bus) : télémétrie, limites, modes, réglages et diagnostic",
+      "it": "Inverter/caricabatterie Victron MultiPlus/Quattro tramite MK2-USB o MK3-USB (VE.Bus): telemetria, limiti, modalità, impostazioni e diagnostica",
+      "es": "Inversores/cargadores Victron MultiPlus/Quattro mediante MK2-USB o MK3-USB (VE.Bus): telemetría, límites, modos, ajustes y diagnóstico",
+      "pl": "Inwertery/ładowarki Victron MultiPlus/Quattro przez MK2-USB lub MK3-USB (VE.Bus): telemetria, limity, tryby, ustawienia i diagnostyka",
+      "uk": "Інвертори/зарядні пристрої Victron MultiPlus/Quattro через MK2-USB або MK3-USB (VE.Bus): телеметрія, обмеження, режими, налаштування та діагностика",
+      "zh-cn": "通过 MK2-USB 或 MK3-USB（VE.Bus）连接 Victron MultiPlus/Quattro 逆变器/充电器：遥测、限制、模式、设置和诊断"
+    },
+    "authors": [
+      "joergoss <joerg.oss@gmx.de> (https://github.com/joergoss)"
+    ],
+    "keywords": [
+      "victron",
+      "ve.bus",
+      "mk2",
+      "mk3",
+      "multiplus",
+      "quattro",
+      "inverter",
+      "charger",
+      "energy"
+    ],
+    "licenseInformation": {
+      "type": "free",
+      "license": "MIT"
+    },
+    "tier": 3,
+    "platform": "Javascript/Node.js",
+    "icon": "victron-mk2.png",
+    "enabled": true,
+    "extIcon": "https://raw.githubusercontent.com/joergoss/ioBroker.victron-mk2/master/admin/victron-mk2.png",
+    "readme": "https://github.com/joergoss/ioBroker.victron-mk2/blob/master/README.md",
+    "loglevel": "info",
+    "mode": "daemon",
+    "type": "energy",
+    "compact": true,
+    "connectionType": "local",
+    "dataSource": "poll",
+    "supportCustoms": true,
+    "adminUI": {
+      "config": "json"
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=6.0.11"
+      }
+    ],
+    "globalDependencies": [
+      {
+        "admin": ">=7.7.22"
+      }
+    ]
+  },
+  "native": {
+    "interval": 2,
+    "portPath": "",
+    "responseTimeout": 1500
+  },
+  "objects": [],
+  "instanceObjects": []
 }
