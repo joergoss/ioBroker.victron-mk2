@@ -235,18 +235,19 @@ class VictronMk2 extends utils.Adapter {
     }
     async updateStates() {
         var _a;
+        const mk2 = this.mk2;
+        if (!mk2)
+            return;
         try {
-            if (!this.mk2)
-                return;
             // Read-only state poll first. While the MultiPlus is booting or off
             // (state 10/20) no control command and no full poll is sent.
-            await this.mk2.pollStateOnly();
+            await mk2.pollStateOnly();
             // Publish the state poll as well: an Off or a boot loop must be visible
             // in ioBroker and to the watchdog, not just the last stable state.
             // info.connection is published from the model, so there is exactly one
             // writer and a failed full poll cannot be masked by a direct setState.
             await this.publishStates(["state.state", "state.substate", "info.address", "info.connection"]);
-            const state = this.mk2.mk2Model["state.state"].value;
+            const state = mk2.mk2Model["state.state"].value;
             if (!(0, state_gate_1.isStableState)(state)) {
                 this.log.debug("MultiPlus not stable yet (state " + state + "), deferring control writes");
                 return;
@@ -264,8 +265,8 @@ class VictronMk2 extends utils.Adapter {
             // (e.g. the 0 A guard reads Flags0, grid_mode reads the configured
             // limit). Running the queue before the first poll silently dropped
             // commands that were issued during the startup delay.
-            await this.mk2.poll();
-            if (this.mk2.mk2Model["info.connection"].value === false) {
+            await mk2.poll();
+            if (mk2.mk2Model["info.connection"].value === false) {
                 this.log.warn("full poll failed; deferring control writes to the next cycle");
             }
             else {
@@ -280,20 +281,14 @@ class VictronMk2 extends utils.Adapter {
             // JSON.stringify(Error) yields "{}", so log the message and stack.
             const message = Exception instanceof Error ? ((_a = Exception.stack) !== null && _a !== void 0 ? _a : Exception.message) : JSON.stringify(Exception);
             this.log.error("ERROR updateStates : " + message);
-            // Keep the model as the single source of truth. A direct setState(false)
-            // without updating the model would be skipped by the change detection on
-            // the next successful poll, leaving info.connection stuck at false (#77).
+            // Keep the model as the single source of truth so a later successful
+            // poll republishes info.connection as true (#77).
             try {
-                if (this.mk2) {
-                    this.mk2.mk2Model["info.connection"].value = false;
-                    await this.publishStates(["info.connection"]);
-                    await this.setStateAsync("diag.timeouts", { val: this.mk2.conn.timeouts, ack: true });
-                    await this.setStateAsync("diag.checksum_errors", { val: this.mk2.conn.checksumErrors, ack: true });
-                    await this.setStateAsync("diag.last_error", { val: this.mk2.conn.lastError, ack: true });
-                }
-                else {
-                    await this.setStateAsync("info.connection", { val: false, ack: true });
-                }
+                mk2.mk2Model["info.connection"].value = false;
+                await this.publishStates(["info.connection"]);
+                await this.setStateAsync("diag.timeouts", { val: mk2.conn.timeouts, ack: true });
+                await this.setStateAsync("diag.checksum_errors", { val: mk2.conn.checksumErrors, ack: true });
+                await this.setStateAsync("diag.last_error", { val: mk2.conn.lastError, ack: true });
             }
             catch (_b) {
                 // ignore secondary state errors while handling a failure
