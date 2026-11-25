@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "victron-mk2",
-    "version": "0.4.2",
+    "version": "0.4.3",
     "news": {
+      "0.4.3": {
+        "en": "Fix Off-state polling and power-on recovery, failed-poll diagnostics and F5 timeout handling (#81-#83)",
+        "de": "Off-Polling und Power-on-Recovery, Fehlerdiagnose nach Polls und F5-Timeout-Behandlung korrigiert (#81-#83)",
+        "ru": "Исправлены опрос и включение из Off, диагностика сбоев опроса и тайм-аут F5 (#81-#83)",
+        "pt": "Corrigir polling e recuperação em Off, diagnóstico de falhas e tempo limite F5 (#81-#83)",
+        "nl": "Off-polling en inschakelherstel, foutdiagnose en F5-time-outafhandeling gecorrigeerd (#81-#83)",
+        "fr": "Correction du polling et du redémarrage depuis Off, du diagnostic d’échec et du délai F5 (#81-#83)",
+        "it": "Corretti polling e ripristino da Off, diagnostica degli errori e gestione del timeout F5 (#81-#83)",
+        "es": "Corregidos el sondeo y la recuperación desde Off, el diagnóstico de fallos y el tiempo de espera F5 (#81-#83)",
+        "pl": "Naprawiono odpytywanie i wznawianie z Off, diagnostykę błędów oraz obsługę limitu czasu F5 (#81-#83)",
+        "uk": "Виправлено опитування та відновлення з Off, діагностику збоїв і обробку тайм-ауту F5 (#81-#83)",
+        "zh-cn": "修复 Off 状态轮询与开机恢复、轮询故障诊断和 F5 超时处理 (#81-#83)"
+      },
       "0.4.2": {
         "en": "Use 5000 ms as the default MK2 response timeout; custom values remain unchanged (#79)",
         "de": "5000 ms als Standard für den MK2-Antwort-Timeout; benutzerdefinierte Werte bleiben unverändert (#79)",
