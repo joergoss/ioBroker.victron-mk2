@@ -130,6 +130,7 @@ accepted it and a readback matched.
   `control.grid_mode` are forwarded, every other control write is dropped.
   `control.grid_mode = 0` while Off is rejected unless a configured or current
   AC input limit is known; it never falls back to 16 A or the device maximum.
+  Grid modes 1 and 2 read Flags0 directly for their PowerAssist validation.
 
 ## Troubleshooting
 

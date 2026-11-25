@@ -9,7 +9,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Off-state recovery**: an Off MultiPlus no longer triggers a repeating full-poll
   timeout loop. Explicit power-on controls can run without a successful full
   poll, while unrelated controls remain blocked and grid recovery without a
-  known AC input limit is rejected instead of using a fallback (issue #83).
+  known AC input limit is rejected instead of using a fallback. Grid modes that
+  need PowerAssist read Flags0 directly, and unread model defaults are not
+  published as device values before the first full poll (issue #83).
 - **Failure boundaries**: failed full polls now stop all follow-up serial I/O;
   extended settings propagate transport errors, and state-only failures publish
   the complete protocol/sync diagnostics (issue #82).

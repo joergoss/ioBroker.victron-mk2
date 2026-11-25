@@ -264,8 +264,20 @@ class VictronMk2 extends utils.Adapter {
                 if (this.toSendQueue.length !== before) {
                     this.log.warn("device is Off: only switch_state/grid_mode writes are allowed, other control writes dropped");
                 }
+                const hadPowerOnRequest = this.toSendQueue.length > 0;
+                const needsPowerAssist = this.toSendQueue.some((item) => item.name === "control.grid_mode" && (item.value === 1 || item.value === 2));
+                if (needsPowerAssist) {
+                    // Modes 1/2 need AssistEnabled for their 0 A safety validation.
+                    // Read just Flags0 instead of restoring the full-poll dependency.
+                    await mk2.get_flags();
+                }
                 await this.processToSendQueue();
-                await this.publishStates();
+                if (this.modelPopulated) {
+                    await this.publishStates();
+                }
+                else {
+                    await this.publishBeforeFirstFullPoll(hadPowerOnRequest, needsPowerAssist);
+                }
                 await this.reconcileStaleControls();
                 return;
             }
@@ -276,7 +288,12 @@ class VictronMk2 extends utils.Adapter {
                 this.log.warn("full poll failed; deferring control writes to the next cycle");
                 // A failed poll is a hard boundary for serial I/O. In particular,
                 // updateSettingObjects() must not reopen the port for metadata reads.
-                await this.publishStates();
+                if (this.modelPopulated) {
+                    await this.publishStates();
+                }
+                else {
+                    await this.publishBeforeFirstFullPoll();
+                }
                 return;
             }
             this.modelPopulated = true;
@@ -314,6 +331,31 @@ class VictronMk2 extends utils.Adapter {
         await (0, publish_1.publishModel)(this.mk2.mk2Model, async (key, value) => {
             await this.setStateAsync(key, { val: value, ack: true });
         }, only);
+    }
+    /** Publish only values actually known before the first successful full poll. */
+    async publishBeforeFirstFullPoll(includeSwitchAndAssist = false, includeFlags = false) {
+        if (!this.mk2)
+            return;
+        const keys = [
+            "state.state",
+            "state.substate",
+            "info.address",
+            "info.connection",
+            "diag.timeouts",
+            "diag.checksum_errors",
+            "diag.last_error",
+            "diag.protocol_errors",
+            "diag.sync_errors",
+            "diag.last_control_error",
+        ];
+        const modelKeys = Object.keys(this.mk2.mk2Model);
+        if (includeSwitchAndAssist) {
+            keys.push(...modelKeys.filter((key) => key.startsWith("switch.") || key.startsWith("assist.")));
+        }
+        if (includeFlags) {
+            keys.push(...modelKeys.filter((key) => key.startsWith("setting.flag.")));
+        }
+        await this.publishStates(keys);
     }
     async processToSendQueue() {
         var _a;

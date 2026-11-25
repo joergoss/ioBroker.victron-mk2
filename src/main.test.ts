@@ -244,6 +244,9 @@ describe("adapter lifecycle", () => {
 		expect(fullPolls).to.equal(0);
 		expect(adapter.states["state.state"].val).to.equal(20);
 		expect(adapter.states["info.connection"].val).to.equal(true);
+		expect(adapter.states["switch.state"]).to.equal(undefined);
+		expect(adapter.states["dc_info.ubat"]).to.equal(undefined);
+		expect(adapter.states["led.mains"]).to.equal(undefined);
 	});
 
 	it("processes explicit power-on controls without a full poll while Off (issue #83)", async () => {
@@ -294,6 +297,28 @@ describe("adapter lifecycle", () => {
 		expect(fake.requests.some((request) => request[2] === 0x53)).to.equal(false);
 		expect(adapter.toSendQueue).to.have.length(0);
 		expect(adapter.states["diag.last_control_error"].val).to.contain("known AC input limit");
+	});
+
+	it("loads Flags0 for Off grid modes that need PowerAssist (issues #82, #83)", async () => {
+		for (const [mode, expectedSwitch] of [[1, 3], [2, 2]]) {
+			const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+			const fake = new FakeMk2Connection();
+			fake.currentState = 2;
+			fake.switchState = 4;
+			fake.switchRegister = 0;
+			const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+			adapter.mk2 = protocol;
+			adapter.toSendQueue = [{ name: "control.grid_mode", value: mode, attempts: 0 }];
+			protocol.poll = async () => {
+				throw new Error("full poll must not be required");
+			};
+
+			await adapter.updateStates();
+
+			expect(fake.switchState).to.equal(expectedSwitch);
+			expect(adapter.states["setting.flag.AssistEnabled"].val).to.equal(true);
+			expect(adapter.toSendQueue).to.have.length(0);
+		}
 	});
 
 	it("rejects Off grid-mode recovery when the panel register is missing (issue #83)", async () => {
@@ -376,6 +401,8 @@ describe("adapter lifecycle", () => {
 		expect(adapter.states["info.connection"].val).to.equal(false);
 		expect(adapter.states["diag.timeouts"].val).to.equal(7);
 		expect(metadataReads).to.equal(0);
+		expect(adapter.states["switch.state"]).to.equal(undefined);
+		expect(adapter.states["dc_info.ubat"]).to.equal(undefined);
 	});
 
 	it("publishes all diagnostics after a state-only failure (issue #82)", async () => {
