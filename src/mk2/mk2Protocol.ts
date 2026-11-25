@@ -166,16 +166,24 @@ export class Mk2Protocol {
 	}
 
 	/**
-	 * Minimal, read-only poll used to determine whether the MultiPlus has
+	 * Minimal, read-only poll of the device address and main state. It runs first
+	 * in every cycle, is the only serial exchange while the MultiPlus is Off
+	 * (unless a power-on control is queued), and confirms that the device has
 	 * finished booting before any control command is sent.
 	 */
 	async pollStateOnly(): Promise<void> {
-		await this.conn.ensureSynced()
-		this.checkConnectionGeneration()
-		await this.address()
-		await this.get_state()
-		// Successful exchange: connected. The full poll owns the failure case.
-		this.mk2Model["info.connection"].value = true
+		try {
+			await this.conn.ensureSynced()
+			this.checkConnectionGeneration()
+			await this.address()
+			await this.get_state()
+			// Successful exchange: connected. The full poll owns its own failure case.
+			this.mk2Model["info.connection"].value = true
+		} finally {
+			// State-only is the first request after every resync. Publish sync and
+			// transport diagnostics here as well, not only after a full poll (#82).
+			this.updateDiagnostics()
+		}
 	}
 
 	checksum(buffer: Buffer): boolean {
@@ -556,7 +564,7 @@ export class Mk2Protocol {
 				this.log.info(`switch state changed on the device: ${this.currentSwitchState} -> ${applied}; adopting it`)
 				this.currentSwitchState = applied
 			}
-		}, { readTimeoutMs: 2000 }); // protocol §3.3: the F5 response may take >750 ms
+		}, { readTimeoutMs: Math.max(2000, this.conn.responseTimeoutMs) }); // F5 honours the configured response budget (#81)
 	}
 
 
@@ -734,7 +742,7 @@ export class Mk2Protocol {
 		if (![0,1,2].includes(mode)) {
 			throw new Mk2ValidationError(`set_grid_mode: invalid mode ${mode}`)
 		}
-		if (this.currentSwitchState == 4) {
+		if (this.deviceIsOff()) {
 			// An explicit mode command may switch the unit on, but say so (review M4).
 			this.log.warn("device switch is Off; grid_mode switches it on explicitly")
 		}
@@ -767,20 +775,22 @@ export class Mk2Protocol {
 			}
 			return mode
 		}
-		this.currentSwitchState = 3
 		const configured = this.mk2Model["setting.IMainsLimitAC1"].value
 		const current = this.mk2Model["assist.limit"].value
 		const max = this.mk2Model["assist.maxlimit"].value
+		const knownLimit = typeof configured === "number" && configured > 0
+			? configured
+			: typeof current === "number" && current > 0 ? current : undefined
+		if (mode == 0 && this.deviceIsOff() && knownLimit === undefined) {
+			// Off recovery may run without a full poll. Never turn the unit on with
+			// the generic 16 A/device-max fallback when no safe shore limit is known.
+			throw new Mk2ValidationError("set_grid_mode: Off recovery requires a known AC input limit")
+		}
 		// Grid mode must not silently raise the shore-current limit: prefer the
 		// configured value, then keep the current one, never the device rating
 		// just because the configuration is unknown (review N15).
-		const limit = mode == 0
-			? (typeof configured == "number" && configured > 0
-				? configured
-				: typeof current == "number" && current > 0
-					? current
-					: typeof max == "number" && max > 0 ? max : 16)
-			: 0
+		const limit = mode == 0 ? knownLimit ?? (typeof max == "number" && max > 0 ? max : 16) : 0
+		this.currentSwitchState = 3
 		try {
 			await this.set_assist(limit)
 		} catch (error) {
@@ -788,6 +798,15 @@ export class Mk2Protocol {
 			throw error;
 		}
 		return mode
+	}
+
+	/** Off per the panel switch cache or the authoritative main state. */
+	private deviceIsOff(): boolean {
+		if (this.currentSwitchState == 4) {
+			return true
+		}
+		const state = this.mk2Model["state.state"].value
+		return typeof state === "number" && Math.floor(state / 10) === 2
 	}
 
 	/** Re-read F5 after a failed write; fall back to the pre-write value only
@@ -966,8 +985,13 @@ export class Mk2Protocol {
 				const raw = await this.readSetting(def.id);
 				this.mk2Model[def.key].value = raw === null ? null : round(settingDisplayValue(info, raw), 3);
 			} catch (error) {
-				// One broken setting must neither block the others nor cause a full
-				// reload on every poll (review N9). Negative-cache it until resync.
+				// A transport error invalidates the whole poll. Do not negative-cache
+				// a setting or reopen the port for later settings in the same poll.
+				if (error instanceof Mk2TransportError) {
+					throw error;
+				}
+				// One genuinely broken/unsupported setting must neither block the
+				// others nor cause a full reload on every poll (review N9).
 				this.log.warn(`setting ${def.key} could not be loaded: ${error instanceof Error ? error.message : error}`);
 				this.failedExtendedSettings.add(def.id);
 				this.mk2Model[def.key].value = null;

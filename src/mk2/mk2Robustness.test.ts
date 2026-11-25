@@ -144,3 +144,29 @@ describe("error message quality (issue #61)", () => {
 		expect(errors.some((m) => m.includes("[object Object]"))).to.equal(false);
 	});
 });
+
+describe("failure-path diagnostics and extended settings (issue #82)", () => {
+	it("mirrors diagnostics even when the state-only poll fails", async () => {
+		const fake = new FakeMk2Connection();
+		fake.failNext = "04ff410100bb";
+		fake.protocolErrors = 2;
+		fake.syncErrors = 3;
+		const p = protocolWith(fake);
+
+		await expect(p.pollStateOnly()).to.be.rejectedWith("simulated communication failure");
+		expect(p.mk2Model["diag.protocol_errors"].value).to.equal(2);
+		expect(p.mk2Model["diag.sync_errors"].value).to.equal(3);
+	});
+
+	it("aborts the full poll on an extended-setting transport failure", async () => {
+		const fake = new FakeMk2Connection();
+		const p = protocolWith(fake);
+		const firstExtendedInfoRequest = p.create_frame("W", Buffer.from([0x35, 2, 0])).toString("hex");
+		fake.failNext = firstExtendedInfoRequest;
+
+		await p.poll();
+
+		expect(p.mk2Model["info.connection"].value).to.equal(false);
+		expect(fake.requests.at(-1)?.toString("hex")).to.equal(firstExtendedInfoRequest);
+	});
+});

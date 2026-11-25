@@ -44,8 +44,8 @@ export class Mk2Connection {
 	/**
 	 * Response budget per frame. Protocol §3.3 recommends 500 ms, but long MK2
 	 * frames and a busy host (ioBroker on a Raspberry Pi) need more headroom.
-	 * 5000 ms has proven reliable on firmware 1909209. The F5 request path has
-	 * its own fixed 2000 ms compatibility budget.
+	 * 5000 ms has proven reliable on firmware 1909209. F5 uses the same budget
+	 * with a 2000 ms minimum.
 	 */
 	responseTimeoutMs = 5000;
 	/** Receive accumulator; bytes after a complete frame stay for the next read. */

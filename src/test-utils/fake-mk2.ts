@@ -206,6 +206,8 @@ export class FakeMk2Connection {
 	ignoreAssistWrites = false;
 	timeouts = 0;
 	checksumErrors = 0;
+	protocolErrors = 0;
+	syncErrors = 0;
 	lastError = "";
 	failNext?: string;
 

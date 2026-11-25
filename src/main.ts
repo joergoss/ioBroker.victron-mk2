@@ -24,6 +24,8 @@ class VictronMk2 extends utils.Adapter {
 	private settingObjectBounds = new Map<string, string>();
 	private started = false;
 	private staleControlsChecked = false;
+	/** True once a full poll has read the control-relevant values from the device. */
+	private modelPopulated = false;
 
 	public constructor(options: Partial<utils.AdapterOptions> = {}) {
 		super({
@@ -204,8 +206,8 @@ class VictronMk2 extends utils.Adapter {
 		const mk2 = this.mk2;
 		if (!mk2) return;
 		try {
-			// Read-only state poll first. While the MultiPlus is booting or off
-			// (state 10/20) no control command and no full poll is sent.
+			// Read-only state poll first. While the MultiPlus is booting, no
+			// control command or full poll is sent. Off is handled separately below.
 			await mk2.pollStateOnly();
 			// Publish the state poll as well: an Off or a boot loop must be visible
 			// in ioBroker and to the watchdog, not just the last stable state.
@@ -218,26 +220,50 @@ class VictronMk2 extends utils.Adapter {
 				return;
 			}
 
-			if (state === 20) {
-				// Off must not become a one-way state (review H2): only the explicit
-				// power-on controls are forwarded, everything else is dropped.
+			if (typeof state === "number" && Math.floor(state / 10) === 2) {
+				// Off must not become a one-way state (review H2): only explicit
+				// power-on controls are forwarded. A full poll is neither needed nor
+				// a safe prerequisite here; on affected firmware its commands can
+				// time out while Off and would otherwise block recovery forever (#83).
 				const before = this.toSendQueue.length;
 				this.toSendQueue = this.toSendQueue.filter((item) => controlAllowedWhileOff(item.name));
 				if (this.toSendQueue.length !== before) {
 					this.log.warn("device is Off: only switch_state/grid_mode writes are allowed, other control writes dropped");
 				}
+				const hadPowerOnRequest = this.toSendQueue.length > 0;
+				const needsPowerAssist = this.toSendQueue.some((item) =>
+					item.name === "control.grid_mode" && (item.value === 1 || item.value === 2));
+				if (needsPowerAssist) {
+					// Modes 1/2 need AssistEnabled for their 0 A safety validation.
+					// Read just Flags0 instead of restoring the full-poll dependency.
+					await mk2.get_flags();
+				}
+				await this.processToSendQueue();
+				if (this.modelPopulated) {
+					await this.publishStates();
+				} else {
+					await this.publishBeforeFirstFullPoll(hadPowerOnRequest, needsPowerAssist);
+				}
+				await this.reconcileStaleControls();
+				return;
 			}
 
-			// Full poll first: control writes depend on flags and extended settings
-			// (e.g. the 0 A guard reads Flags0, grid_mode reads the configured
-			// limit). Running the queue before the first poll silently dropped
-			// commands that were issued during the startup delay.
+			// Outside Off, control writes depend on flags and extended settings
+			// loaded by the full poll (e.g. the 0 A guard reads Flags0).
 			await mk2.poll();
 			if (mk2.mk2Model["info.connection"].value === false) {
 				this.log.warn("full poll failed; deferring control writes to the next cycle");
-			} else {
-				await this.processToSendQueue();
+				// A failed poll is a hard boundary for serial I/O. In particular,
+				// updateSettingObjects() must not reopen the port for metadata reads.
+				if (this.modelPopulated) {
+					await this.publishStates();
+				} else {
+					await this.publishBeforeFirstFullPoll();
+				}
+				return;
 			}
+			this.modelPopulated = true;
+			await this.processToSendQueue();
 			await this.publishStates();
 			await this.reconcileStaleControls();
 			await this.updateAssistLimitObject();
@@ -250,10 +276,14 @@ class VictronMk2 extends utils.Adapter {
 			// poll republishes info.connection as true (#77).
 			try {
 				mk2.mk2Model["info.connection"].value = false;
-				await this.publishStates(["info.connection"]);
-				await this.setStateAsync("diag.timeouts", { val: mk2.conn.timeouts, ack: true });
-				await this.setStateAsync("diag.checksum_errors", { val: mk2.conn.checksumErrors, ack: true });
-				await this.setStateAsync("diag.last_error", { val: mk2.conn.lastError, ack: true });
+				await this.publishStates([
+					"info.connection",
+					"diag.timeouts",
+					"diag.checksum_errors",
+					"diag.last_error",
+					"diag.protocol_errors",
+					"diag.sync_errors",
+				]);
 			} catch {
 				// ignore secondary state errors while handling a failure
 			}
@@ -265,6 +295,31 @@ class VictronMk2 extends utils.Adapter {
 		await publishModel(this.mk2.mk2Model, async (key, value) => {
 			await this.setStateAsync(key, { val: value, ack: true });
 		}, only);
+	}
+
+	/** Publish only values actually known before the first successful full poll. */
+	private async publishBeforeFirstFullPoll(includeSwitchAndAssist = false, includeFlags = false): Promise<void> {
+		if (!this.mk2) return;
+		const keys = [
+			"state.state",
+			"state.substate",
+			"info.address",
+			"info.connection",
+			"diag.timeouts",
+			"diag.checksum_errors",
+			"diag.last_error",
+			"diag.protocol_errors",
+			"diag.sync_errors",
+			"diag.last_control_error",
+		];
+		const modelKeys = Object.keys(this.mk2.mk2Model);
+		if (includeSwitchAndAssist) {
+			keys.push(...modelKeys.filter((key) => key.startsWith("switch.") || key.startsWith("assist.")));
+		}
+		if (includeFlags) {
+			keys.push(...modelKeys.filter((key) => key.startsWith("setting.flag.")));
+		}
+		await this.publishStates(keys);
 	}
 
 	async processToSendQueue(): Promise<void> {
@@ -304,7 +359,7 @@ class VictronMk2 extends utils.Adapter {
 	 * device's actual value so they do not look like the current setting.
 	 */
 	private async reconcileStaleControls(): Promise<void> {
-		if (this.staleControlsChecked) return;
+		if (this.staleControlsChecked || !this.modelPopulated) return;
 		this.staleControlsChecked = true;
 		for (const id of CONTROL_STATE_IDS) {
 			const state = await this.getStateAsync(id);
@@ -345,6 +400,9 @@ class VictronMk2 extends utils.Adapter {
 
 	/** Device value that corresponds to a control command state, if known. */
 	private actualControlValue(name: string): number | boolean | undefined {
+		// Before the first full poll the model still holds static defaults, not
+		// device values; publishing them as "actual" would fabricate a setting.
+		if (!this.modelPopulated) return undefined;
 		if (!this.mk2) return undefined;
 		const model = this.mk2.mk2Model;
 		const num = (key: string): number | undefined => {
