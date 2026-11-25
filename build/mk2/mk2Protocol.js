@@ -163,7 +163,9 @@ class Mk2Protocol {
         this.mk2Model["diag.sync_errors"].value = (_e = this.conn.syncErrors) !== null && _e !== void 0 ? _e : 0;
     }
     /**
-     * Minimal, read-only poll used to determine whether the MultiPlus has
+     * Minimal, read-only poll of the device address and main state. It runs first
+     * in every cycle, is the only serial exchange while the MultiPlus is Off
+     * (unless a power-on control is queued), and confirms that the device has
      * finished booting before any control command is sent.
      */
     async pollStateOnly() {

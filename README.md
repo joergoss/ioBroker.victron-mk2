@@ -60,7 +60,7 @@ change after a reboot.
 | --- | --- | --- |
 | `portPath` | – | Serial port of the MK2-USB/MK3-USB interface. |
 | `interval` | `2` | Seconds between two complete polls. A poll that takes longer than the interval is followed immediately by the next one. |
-| `responseTimeout` | `5000` | Maximum wait time in milliseconds for one MK2 frame. The protocol recommends 500 ms; long MK2 frames and busy hosts need more headroom. |
+| `responseTimeout` | `5000` | Maximum wait time in milliseconds for one MK2 frame. The protocol recommends 500 ms; long MK2 frames and busy hosts need more headroom. F5 (MasterMultiLED) reads wait at least 2000 ms even when a shorter value is configured. |
 
 The adapter opens the port with **2400 baud** and sets DTR as required by the
 MK2 protocol.
@@ -124,10 +124,11 @@ accepted it and a readback matched.
   send control commands or a full poll. If the device does not finish booting
   with the MK2 attached, start it without the MK2 and attach/start the adapter
   afterwards.
-- **Off:** while the MultiPlus is Off (`state 20`) the periodic cycle runs only
-  the read-only state poll and skips the full poll, so a poll that cannot
-  succeed does not block recovery. Only `control.switch_state` and
-  `control.grid_mode` are forwarded, every other control write is dropped.
+- **Off:** while the MultiPlus is Off (`state 20`) the periodic cycle skips the
+  full poll, so a poll that cannot succeed does not block recovery. Without a
+  pending power-on control it runs only the read-only state poll. Only
+  `control.switch_state` and `control.grid_mode` are forwarded, every other
+  control write is dropped.
   `control.grid_mode = 0` while Off is rejected unless a configured or current
   AC input limit is known; it never falls back to 16 A or the device maximum.
   Grid modes 1 and 2 read Flags0 directly for their PowerAssist validation.
