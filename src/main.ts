@@ -24,6 +24,8 @@ class VictronMk2 extends utils.Adapter {
 	private settingObjectBounds = new Map<string, string>();
 	private started = false;
 	private staleControlsChecked = false;
+	/** True once a full poll has read the control-relevant values from the device. */
+	private modelPopulated = false;
 
 	public constructor(options: Partial<utils.AdapterOptions> = {}) {
 		super({
@@ -244,6 +246,7 @@ class VictronMk2 extends utils.Adapter {
 				await this.publishStates();
 				return;
 			}
+			this.modelPopulated = true;
 			await this.processToSendQueue();
 			await this.publishStates();
 			await this.reconcileStaleControls();
@@ -315,7 +318,7 @@ class VictronMk2 extends utils.Adapter {
 	 * device's actual value so they do not look like the current setting.
 	 */
 	private async reconcileStaleControls(): Promise<void> {
-		if (this.staleControlsChecked) return;
+		if (this.staleControlsChecked || !this.modelPopulated) return;
 		this.staleControlsChecked = true;
 		for (const id of CONTROL_STATE_IDS) {
 			const state = await this.getStateAsync(id);
@@ -356,6 +359,9 @@ class VictronMk2 extends utils.Adapter {
 
 	/** Device value that corresponds to a control command state, if known. */
 	private actualControlValue(name: string): number | boolean | undefined {
+		// Before the first full poll the model still holds static defaults, not
+		// device values; publishing them as "actual" would fabricate a setting.
+		if (!this.modelPopulated) return undefined;
 		if (!this.mk2) return undefined;
 		const model = this.mk2.mk2Model;
 		const num = (key: string): number | undefined => {

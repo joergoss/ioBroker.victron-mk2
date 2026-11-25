@@ -130,6 +130,7 @@ describe("adapter lifecycle", () => {
 
 	it("resets a rejected control state to the device value", async () => {
 		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		adapter.modelPopulated = true;
 		adapter.mk2 = {
 			master_multi_led_info: async () => undefined,
 			mk2Model: {
@@ -154,6 +155,7 @@ describe("adapter lifecycle", () => {
 
 	it("does not reset a control state that was overwritten by a newer request", async () => {
 		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		adapter.modelPopulated = true;
 		adapter.mk2 = {
 			master_multi_led_info: async () => undefined,
 			mk2Model: {
@@ -292,6 +294,65 @@ describe("adapter lifecycle", () => {
 		expect(fake.requests.some((request) => request[2] === 0x53)).to.equal(false);
 		expect(adapter.toSendQueue).to.have.length(0);
 		expect(adapter.states["diag.last_control_error"].val).to.contain("known AC input limit");
+	});
+
+	it("rejects Off grid-mode recovery when the panel register is missing (issue #83)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.masterMultiLedHasRegister = false;
+		fake.limit = 0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [{ name: "control.grid_mode", value: 0, attempts: 0 }];
+		adapter.states["control.grid_mode"] = { val: 0, ack: false };
+		protocol.poll = async () => {
+			protocol.mk2Model["info.connection"].value = false;
+		};
+
+		await adapter.updateStates();
+
+		expect(protocol.currentSwitchState).to.equal(3);
+		expect(fake.switchState).to.equal(4);
+		expect(fake.requests.some((request) => request[2] === 0x53)).to.equal(false);
+		expect(adapter.states["control.grid_mode"]).to.include({ val: 0, ack: false });
+		expect(adapter.states["diag.last_control_error"].val).to.contain("known AC input limit");
+	});
+
+	it("does not reset stale controls before the model was polled (issue #83)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		fake.limit = 0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [];
+		adapter.states["control.switch_state"] = { val: 4, ack: false };
+		protocol.poll = async () => {
+			protocol.mk2Model["info.connection"].value = false;
+		};
+
+		await adapter.updateStates();
+
+		// The Off cycle never polled switch.state, so its static default must not
+		// be published as the device's actual value.
+		expect(adapter.states["control.switch_state"]).to.include({ val: 4, ack: false });
+	});
+
+	it("resets a stale control state once a full poll populated the model", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [];
+		adapter.states["control.switch_state"] = { val: 4, ack: false };
+
+		await adapter.updateStates();
+
+		expect(adapter.states["control.switch_state"]).to.include({ val: 3, ack: true });
 	});
 
 	it("stops all follow-up work after a failed full poll (issue #82)", async () => {

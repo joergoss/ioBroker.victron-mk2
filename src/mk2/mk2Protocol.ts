@@ -740,7 +740,7 @@ export class Mk2Protocol {
 		if (![0,1,2].includes(mode)) {
 			throw new Mk2ValidationError(`set_grid_mode: invalid mode ${mode}`)
 		}
-		if (this.currentSwitchState == 4) {
+		if (this.deviceIsOff()) {
 			// An explicit mode command may switch the unit on, but say so (review M4).
 			this.log.warn("device switch is Off; grid_mode switches it on explicitly")
 		}
@@ -779,7 +779,7 @@ export class Mk2Protocol {
 		const knownLimit = typeof configured === "number" && configured > 0
 			? configured
 			: typeof current === "number" && current > 0 ? current : undefined
-		if (mode == 0 && previousSwitchState == 4 && knownLimit === undefined) {
+		if (mode == 0 && this.deviceIsOff() && knownLimit === undefined) {
 			// Off recovery may run without a full poll. Never turn the unit on with
 			// the generic 16 A/device-max fallback when no safe shore limit is known.
 			throw new Mk2ValidationError("set_grid_mode: Off recovery requires a known AC input limit")
@@ -796,6 +796,15 @@ export class Mk2Protocol {
 			throw error;
 		}
 		return mode
+	}
+
+	/** Off per the panel switch cache or the authoritative main state. */
+	private deviceIsOff(): boolean {
+		if (this.currentSwitchState == 4) {
+			return true
+		}
+		const state = this.mk2Model["state.state"].value
+		return typeof state === "number" && Math.floor(state / 10) === 2
 	}
 
 	/** Re-read F5 after a failed write; fall back to the pre-write value only
