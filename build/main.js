@@ -239,8 +239,8 @@ class VictronMk2 extends utils.Adapter {
         if (!mk2)
             return;
         try {
-            // Read-only state poll first. While the MultiPlus is booting or off
-            // (state 10/20) no control command and no full poll is sent.
+            // Read-only state poll first. While the MultiPlus is booting, no
+            // control command or full poll is sent. Off is handled separately below.
             await mk2.pollStateOnly();
             // Publish the state poll as well: an Off or a boot loop must be visible
             // in ioBroker and to the watchdog, not just the last stable state.
@@ -252,26 +252,32 @@ class VictronMk2 extends utils.Adapter {
                 this.log.debug("MultiPlus not stable yet (state " + state + "), deferring control writes");
                 return;
             }
-            if (state === 20) {
-                // Off must not become a one-way state (review H2): only the explicit
-                // power-on controls are forwarded, everything else is dropped.
+            if (typeof state === "number" && Math.floor(state / 10) === 2) {
+                // Off must not become a one-way state (review H2): only explicit
+                // power-on controls are forwarded. A full poll is neither needed nor
+                // a safe prerequisite here; on affected firmware its commands can
+                // time out while Off and would otherwise block recovery forever (#83).
                 const before = this.toSendQueue.length;
                 this.toSendQueue = this.toSendQueue.filter((item) => (0, state_gate_1.controlAllowedWhileOff)(item.name));
                 if (this.toSendQueue.length !== before) {
                     this.log.warn("device is Off: only switch_state/grid_mode writes are allowed, other control writes dropped");
                 }
+                await this.processToSendQueue();
+                await this.publishStates();
+                await this.reconcileStaleControls();
+                return;
             }
-            // Full poll first: control writes depend on flags and extended settings
-            // (e.g. the 0 A guard reads Flags0, grid_mode reads the configured
-            // limit). Running the queue before the first poll silently dropped
-            // commands that were issued during the startup delay.
+            // Outside Off, control writes depend on flags and extended settings
+            // loaded by the full poll (e.g. the 0 A guard reads Flags0).
             await mk2.poll();
             if (mk2.mk2Model["info.connection"].value === false) {
                 this.log.warn("full poll failed; deferring control writes to the next cycle");
+                // A failed poll is a hard boundary for serial I/O. In particular,
+                // updateSettingObjects() must not reopen the port for metadata reads.
+                await this.publishStates();
+                return;
             }
-            else {
-                await this.processToSendQueue();
-            }
+            await this.processToSendQueue();
             await this.publishStates();
             await this.reconcileStaleControls();
             await this.updateAssistLimitObject();
@@ -285,10 +291,14 @@ class VictronMk2 extends utils.Adapter {
             // poll republishes info.connection as true (#77).
             try {
                 mk2.mk2Model["info.connection"].value = false;
-                await this.publishStates(["info.connection"]);
-                await this.setStateAsync("diag.timeouts", { val: mk2.conn.timeouts, ack: true });
-                await this.setStateAsync("diag.checksum_errors", { val: mk2.conn.checksumErrors, ack: true });
-                await this.setStateAsync("diag.last_error", { val: mk2.conn.lastError, ack: true });
+                await this.publishStates([
+                    "info.connection",
+                    "diag.timeouts",
+                    "diag.checksum_errors",
+                    "diag.last_error",
+                    "diag.protocol_errors",
+                    "diag.sync_errors",
+                ]);
             }
             catch (_b) {
                 // ignore secondary state errors while handling a failure

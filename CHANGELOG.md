@@ -2,6 +2,20 @@
 
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+## __WORK IN PROGRESS__
+
+### Fixed
+
+- **Off-state recovery**: an Off MultiPlus no longer triggers a repeating full-poll
+  timeout loop. Explicit power-on controls can run without a successful full
+  poll, while unrelated controls remain blocked and grid recovery without a
+  known AC input limit is rejected instead of using a fallback (issue #83).
+- **Failure boundaries**: failed full polls now stop all follow-up serial I/O;
+  extended settings propagate transport errors, and state-only failures publish
+  the complete protocol/sync diagnostics (issue #82).
+- **F5 timeout**: MasterMultiLED reads honour the configured response timeout,
+  retaining a 2000 ms minimum (issue #81).
+
 ## 0.4.2 (2026-11-23)
 
 ### Changed

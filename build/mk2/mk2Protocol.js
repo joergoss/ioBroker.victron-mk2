@@ -167,12 +167,19 @@ class Mk2Protocol {
      * finished booting before any control command is sent.
      */
     async pollStateOnly() {
-        await this.conn.ensureSynced();
-        this.checkConnectionGeneration();
-        await this.address();
-        await this.get_state();
-        // Successful exchange: connected. The full poll owns the failure case.
-        this.mk2Model["info.connection"].value = true;
+        try {
+            await this.conn.ensureSynced();
+            this.checkConnectionGeneration();
+            await this.address();
+            await this.get_state();
+            // Successful exchange: connected. The full poll owns its own failure case.
+            this.mk2Model["info.connection"].value = true;
+        }
+        finally {
+            // State-only is the first request after every resync. Publish sync and
+            // transport diagnostics here as well, not only after a full poll (#82).
+            this.updateDiagnostics();
+        }
     }
     checksum(buffer) {
         let sum = 0;
@@ -508,7 +515,7 @@ class Mk2Protocol {
                 this.log.info(`switch state changed on the device: ${this.currentSwitchState} -> ${applied}; adopting it`);
                 this.currentSwitchState = applied;
             }
-        }, { readTimeoutMs: 2000 }); // protocol §3.3: the F5 response may take >750 ms
+        }, { readTimeoutMs: Math.max(2000, this.conn.responseTimeoutMs) }); // F5 honours the configured response budget (#81)
     }
     async get_state() {
         this.log.debug("******   get_state");
@@ -709,20 +716,22 @@ class Mk2Protocol {
             }
             return mode;
         }
-        this.currentSwitchState = 3;
         const configured = this.mk2Model["setting.IMainsLimitAC1"].value;
         const current = this.mk2Model["assist.limit"].value;
         const max = this.mk2Model["assist.maxlimit"].value;
+        const knownLimit = typeof configured === "number" && configured > 0
+            ? configured
+            : typeof current === "number" && current > 0 ? current : undefined;
+        if (mode == 0 && previousSwitchState == 4 && knownLimit === undefined) {
+            // Off recovery may run without a full poll. Never turn the unit on with
+            // the generic 16 A/device-max fallback when no safe shore limit is known.
+            throw new errors_1.Mk2ValidationError("set_grid_mode: Off recovery requires a known AC input limit");
+        }
         // Grid mode must not silently raise the shore-current limit: prefer the
         // configured value, then keep the current one, never the device rating
         // just because the configuration is unknown (review N15).
-        const limit = mode == 0
-            ? (typeof configured == "number" && configured > 0
-                ? configured
-                : typeof current == "number" && current > 0
-                    ? current
-                    : typeof max == "number" && max > 0 ? max : 16)
-            : 0;
+        const limit = mode == 0 ? knownLimit !== null && knownLimit !== void 0 ? knownLimit : (typeof max == "number" && max > 0 ? max : 16) : 0;
+        this.currentSwitchState = 3;
         try {
             await this.set_assist(limit);
         }
@@ -895,8 +904,13 @@ class Mk2Protocol {
                 this.mk2Model[def.key].value = raw === null ? null : round((0, mk2Settings_1.settingDisplayValue)(info, raw), 3);
             }
             catch (error) {
-                // One broken setting must neither block the others nor cause a full
-                // reload on every poll (review N9). Negative-cache it until resync.
+                // A transport error invalidates the whole poll. Do not negative-cache
+                // a setting or reopen the port for later settings in the same poll.
+                if (error instanceof errors_1.Mk2TransportError) {
+                    throw error;
+                }
+                // One genuinely broken/unsupported setting must neither block the
+                // others nor cause a full reload on every poll (review N9).
                 this.log.warn(`setting ${def.key} could not be loaded: ${error instanceof Error ? error.message : error}`);
                 this.failedExtendedSettings.add(def.id);
                 this.mk2Model[def.key].value = null;

@@ -1,6 +1,8 @@
 import { expect } from "chai";
 import proxyquire from "proxyquire";
 import { Mk2ValidationError } from "./lib/errors";
+import { Mk2Protocol } from "./mk2/mk2Protocol";
+import { asConnection, FakeMk2Connection } from "./test-utils/fake-mk2";
 
 /**
  * Adapter lifecycle tests with a stubbed ioBroker runtime. No hardware and no
@@ -218,5 +220,119 @@ describe("adapter lifecycle", () => {
 		failStatePoll = false;
 		await adapter.updateStates();
 		expect(adapter.states["info.connection"].val).to.equal(true);
+	});
+
+	it("skips the full poll while Off with no power-on request (issue #83)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [];
+		let fullPolls = 0;
+		protocol.poll = async () => {
+			fullPolls++;
+			protocol.mk2Model["info.connection"].value = false;
+		};
+
+		await adapter.updateStates();
+
+		expect(fullPolls).to.equal(0);
+		expect(adapter.states["state.state"].val).to.equal(20);
+		expect(adapter.states["info.connection"].val).to.equal(true);
+	});
+
+	it("processes explicit power-on controls without a full poll while Off (issue #83)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		const originalFlags = fake.flags0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [
+			{ name: "control.DisableCharge", value: 0, attempts: 0 },
+			{ name: "control.switch_state", value: 3, attempts: 0 },
+		];
+		let fullPolls = 0;
+		protocol.poll = async () => {
+			fullPolls++;
+			protocol.mk2Model["info.connection"].value = false;
+		};
+
+		await adapter.updateStates();
+
+		expect(fullPolls).to.equal(0);
+		expect(fake.switchState).to.equal(3);
+		expect(fake.flags0).to.equal(originalFlags); // non-power-on control was not sent
+		expect(adapter.toSendQueue).to.have.length(0);
+		expect(adapter.states["control.switch_state"]).to.include({ val: 3, ack: true });
+	});
+
+	it("rejects Off grid-mode recovery without a known AC input limit (issue #83)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		fake.limit = 0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [{ name: "control.grid_mode", value: 0, attempts: 0 }];
+		protocol.poll = async () => {
+			protocol.mk2Model["info.connection"].value = false;
+		};
+
+		await adapter.updateStates();
+
+		expect(fake.switchState).to.equal(4);
+		expect(fake.requests.some((request) => request[2] === 0x53)).to.equal(false);
+		expect(adapter.toSendQueue).to.have.length(0);
+		expect(adapter.states["diag.last_control_error"].val).to.contain("known AC input limit");
+	});
+
+	it("stops all follow-up work after a failed full poll (issue #82)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [];
+		protocol.poll = async () => {
+			protocol.mk2Model["info.connection"].value = false;
+			protocol.mk2Model["diag.timeouts"].value = 7;
+		};
+		let metadataReads = 0;
+		protocol.getSettingInfo = async () => {
+			metadataReads++;
+			throw new Error("must not be called");
+		};
+
+		await adapter.updateStates();
+
+		expect(adapter.states["info.connection"].val).to.equal(false);
+		expect(adapter.states["diag.timeouts"].val).to.equal(7);
+		expect(metadataReads).to.equal(0);
+	});
+
+	it("publishes all diagnostics after a state-only failure (issue #82)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [];
+		protocol.pollStateOnly = async () => {
+			protocol.mk2Model["diag.protocol_errors"].value = 2;
+			protocol.mk2Model["diag.sync_errors"].value = 3;
+			throw new Error("state-only failure");
+		};
+
+		await adapter.updateStates();
+
+		expect(adapter.states["info.connection"].val).to.equal(false);
+		expect(adapter.states["diag.protocol_errors"].val).to.equal(2);
+		expect(adapter.states["diag.sync_errors"].val).to.equal(3);
 	});
 });

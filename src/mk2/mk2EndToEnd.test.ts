@@ -131,6 +131,31 @@ describe("end-to-end through the real Mk2Connection receiver", () => {
 		expect(p.mk2Model["assist.limit"].value).to.equal(10);
 		expect(p.mk2Model["switch.state"].value).to.equal(3);
 	});
+
+	it("uses the configured timeout for delayed F5 responses (issue #81)", async function () {
+		this.timeout(6000);
+		const f5 = veBusFrame(0x41, [
+			0x10, 0x00, 0x00, 0x00, 0x04,
+			0x1f, 0x00, 0xa0, 0x00,
+			0x64, 0x00,
+			0x30,
+		], 0x0d);
+		const fake = new FakeMk2Serial((request) => {
+			if (request[2] == 0x57 && request[3] == 0x36) return mk2Frame(0x57, [0x8e, 0x9c, 0x7f, 0x8f, 0, 0]);
+			if (request[2] == 0x46 && request[3] == 0x05) {
+				setTimeout(() => fake.push(f5), 2100);
+				return null;
+			}
+			return mk2Frame(0x41, [0x01, 0x00]);
+		});
+		fake.push(versionFrame());
+		const conn = new Mk2Connection("fake", log as any, fake as any);
+		conn.responseTimeoutMs = 5000;
+		const p = new Mk2Protocol("fake", log as any, conn);
+
+		await p.master_multi_led_info();
+		expect(p.mk2Model["switch.state"].value).to.equal(3);
+	});
 });
 
 describe("longer responses are tolerated (issue #42)", () => {
