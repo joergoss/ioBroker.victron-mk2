@@ -120,9 +120,16 @@ accepted it and a readback matched.
 - **One process per port:** do not open the same serial port from another
   program (for example VictronConnect or a second adapter instance) at the same
   time.
-- **Booting:** while the MultiPlus is booting (`state 10/20`) the adapter does
-  not send control commands. If the device does not finish booting with the MK2
-  attached, start it without the MK2 and attach/start the adapter afterwards.
+- **Booting:** while the MultiPlus is booting (`state 10`) the adapter does not
+  send control commands or a full poll. If the device does not finish booting
+  with the MK2 attached, start it without the MK2 and attach/start the adapter
+  afterwards.
+- **Off:** while the MultiPlus is Off (`state 20`) the periodic cycle runs only
+  the read-only state poll and skips the full poll, so a poll that cannot
+  succeed does not block recovery. Only `control.switch_state` and
+  `control.grid_mode` are forwarded, every other control write is dropped.
+  `control.grid_mode = 0` while Off is rejected unless a configured or current
+  AC input limit is known; it never falls back to 16 A or the device maximum.
 
 ## Troubleshooting
 
