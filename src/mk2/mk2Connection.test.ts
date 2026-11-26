@@ -497,4 +497,35 @@ describe("transport error boundaries (issues #89, #91, #92)", () => {
 		expect(conn.lastError).to.not.contain("VE 9-bit");
 		expect(conn.syncErrors).to.equal(2);
 	});
+
+	it("accepts a longer future version frame (issue #91)", async () => {
+		const fake = new FakeMk2Serial();
+		fake.push(mk2Frame(0x56, [0x98, 0x3e, 0x11, 0x00, 0x00, 0xaa]));
+		const conn = connWith(fake);
+		await conn.sync();
+		expect(conn.synced).to.equal(true);
+		expect(conn.mk2Version).to.equal(1130136);
+		expect(conn.mk2Mode).to.equal(0);
+	});
+
+	for (const kind of ["checksum", "protocol"] as const) {
+		it(`propagates a ${kind} error after a partial multi-frame response (issue #92)`, async () => {
+			const first = mk2Frame(0x57, [0x89, 0x9c, 0x7f]);
+			let broken: Buffer = Buffer.from([0x00, 0x00, 0x00]);
+			if (kind === "checksum") {
+				broken = mk2Frame(0x57, [0x8a, 0x00, 0x00]);
+				broken[broken.length - 1] ^= 0xff;
+			}
+			const fake = new FakeMk2Serial(() => [first, broken]);
+			fake.push(versionFrame());
+			const conn = connWith(fake);
+			await expect(conn.communicateMulti(
+				mk2Frame(0x57, [0x35, 2, 0]),
+				async () => false,
+				{ allowQuietEnd: true, readTimeoutMs: 200 },
+			)).to.be.rejectedWith(kind === "checksum" ? "checksum" : "length 0");
+			expect(conn.synced).to.equal(false);
+			expect(kind === "checksum" ? conn.checksumErrors : conn.protocolErrors).to.equal(1);
+		});
+	}
 });

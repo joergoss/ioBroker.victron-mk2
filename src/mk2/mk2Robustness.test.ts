@@ -1,7 +1,8 @@
 import { expect } from "chai";
 import { Mk2Protocol } from "./mk2Protocol";
 import { switchStateFromRegister } from "./mk2Switch";
-import { asConnection, FakeMk2Connection } from "../test-utils/fake-mk2";
+import { asConnection, FakeMk2Connection, FakeMk2Serial, mk2Frame, versionFrame } from "../test-utils/fake-mk2";
+import { Mk2Connection } from "./mk2Connection";
 
 function makeLog() {
 	const infos: string[] = [];
@@ -168,5 +169,21 @@ describe("failure-path diagnostics and extended settings (issue #82)", () => {
 
 		expect(p.mk2Model["info.connection"].value).to.equal(false);
 		expect(fake.requests.at(-1)?.toString("hex")).to.equal(firstExtendedInfoRequest);
+	});
+
+	it("stops extended settings after a partial response and bad checksum (issue #92)", async () => {
+		const first = mk2Frame(0x57, [0x89, 0x9c, 0x7f]);
+		const broken = mk2Frame(0x57, [0x8a, 0x00, 0x00]);
+		broken[broken.length - 1] ^= 0xff;
+		const serial = new FakeMk2Serial(() => [first, broken]);
+		serial.push(versionFrame());
+		const conn = new Mk2Connection("fake", makeLog().logger, serial as any);
+		const p = new Mk2Protocol("fake", makeLog().logger, conn);
+
+		await expect(p.loadExtendedSettings()).to.be.rejectedWith("checksum");
+		expect(serial.written).to.have.length(1);
+		expect(serial.openCount).to.equal(1);
+		expect(conn.synced).to.equal(false);
+		expect(conn.checksumErrors).to.equal(1);
 	});
 });

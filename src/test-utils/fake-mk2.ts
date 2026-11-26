@@ -47,6 +47,7 @@ export class FakeMk2Serial {
 	private incoming: Buffer[] = [];
 	private buffer = Buffer.alloc(0);
 	private opened = false;
+	openCount = 0;
 	openError?: Error;
 	writeError?: Error;
 	splitResponses = false;
@@ -72,6 +73,7 @@ export class FakeMk2Serial {
 	async open(): Promise<void> {
 		if (this.openError) throw this.openError;
 		this.opened = true;
+		this.openCount++;
 	}
 
 	async close(): Promise<void> {
