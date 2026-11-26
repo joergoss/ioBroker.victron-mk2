@@ -1,6 +1,6 @@
 {
   "name": "iobroker.victron-mk2",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Victron MultiPlus/Quattro inverter/chargers via MK2-USB or MK3-USB (VE.Bus)",
   "author": {
     "name": "joerg",
