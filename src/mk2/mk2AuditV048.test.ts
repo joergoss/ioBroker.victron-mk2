@@ -78,6 +78,9 @@ describe("v0.4.8 protocol-audit regressions", () => {
 			expect(p.mk2Model["info.device_sw_version"].value).to.equal(null);
 			await p.get_state();
 			await p.master_multi_led_info();
+			// The complete frame decoded (bytes 11/12 = 0x0032 = 5.0 A), so the
+			// null switch state comes from the ambiguity guard and not a lost frame.
+			expect(p.mk2Model["assist.limit"].value).to.equal(5);
 			expect(p.mk2Model["switch.state"].value).to.equal(null);
 			expect(p.hasUnambiguousSwitchState()).to.equal(false);
 		});
