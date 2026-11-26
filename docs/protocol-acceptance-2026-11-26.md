@@ -1,6 +1,6 @@
 # MK2-Protokoll- und Hardware-Abnahme, 2026-11-26
 
-Stand: Release-Kandidat 0.4.8 auf Basis 0.4.7, einschließlich der Fixes aus
+Stand: Release 0.4.8 auf Basis 0.4.7, einschließlich der Fixes aus
 Issues #97 bis #103. Referenz: *Interfacing with VE.Bus products – MK2 Protocol
 3.14* (22.06.2017).
 
@@ -141,3 +141,32 @@ Nach der finalen Matrix und dem automatischen Adapterstart:
 - `setting.flag.DisableCharge=true`, Ladestrom 0 A;
 - Timeouts, Protokoll-, Sync- und Prüfsummenfehler jeweils 0;
 - `diag.last_error` leer.
+
+## 9. Nachverifikation des installierten Release 0.4.8
+
+Nach Merge von PR #104 und Veröffentlichung von Commit `2c7260d` / Tag `v0.4.8`
+wurde dasselbe Release als frisches `npm pack` auf dem pi4 installiert. Master-
+und Tag-Workflow waren erfolgreich. Die Konfiguration blieb unverändert
+(`/dev/ttyUSB-Serial-1`, 5 s, 5000 ms).
+
+Mit dem installierten Release wurden erneut geprüft:
+
+- Read-only-Matrix: **154/154 bestanden**, alle Transportzähler 0;
+- gezielte reversible Zero-Grid-Setting-Abnahme: **4/4 Schritte bestanden**:
+  `grid_mode=2`, `IMainsLimitAC1=4`, Wiederherstellung auf 5 A und anschließend
+  `grid_mode=0`;
+- während beider Setting-Writes blieben Hauptzustand 40 und Switch 2 bestehen;
+  `DisableCharge=true` und Ladestrom 0 A blieben unverändert;
+- die Wiederherstellung endete mit `restored=true` bei 80/3 und 5 A.
+
+Bei dieser Verbindung waren bereits kurze Winmon-Antworten aktiv, deshalb war
+kein vorbereitender Long-Winmon-Kompatibilitäts-S-Frame erforderlich. Der
+spezielle vorbereitende 0-A-Frame und die konservative Ablehnung bei
+mehrdeutigem Minimum sind durch die Pipeline-Regressionstests abgedeckt; der
+Live-Nachweis zeigt zusätzlich, dass die tatsächlichen Setting-Writes den
+Zero-Grid-Zustand nicht verließen.
+
+Rollback-Artefakte auf dem pi4:
+
+- `/opt/iobroker/backups/iobroker.victron-mk2-0.4.7-source.tar.gz`
+- `/opt/iobroker/backups/iobroker.victron-mk2-0.4.8.tgz`
