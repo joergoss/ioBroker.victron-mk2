@@ -381,9 +381,9 @@ describe("diagnostic counters (issues #65, #66)", () => {
 });
 
 describe("appended LED status (issue #67)", () => {
-	it("does not decode the appended LED block as the next response", async () => {
+	it("rejects the legacy external LED block instead of corrupting the base frame (issues #67, #88)", async () => {
 		const main = mk2Frame(0x41, [0x01, 0x00]);
-		main[0] |= 0x80; // LED status appended (length bit 7)
+		main[0] |= 0x80;
 		main[main.length - 1] = 0;
 		let sum = 0;
 		for (const b of main) sum += b;
@@ -392,10 +392,7 @@ describe("appended LED status (issue #67)", () => {
 		const fake = new FakeMk2Serial();
 		fake.push(Buffer.concat([main, Buffer.from([0x4c, 0x01, 0x00]), mk2Frame(0x41, [0x01, 0x00])]));
 		const conn = connWith(fake);
-		const first = await conn.receiveFrame(200);
-		expect(first[2]).to.equal(0x41);
-		const second = await conn.receiveFrame(200);
-		expect(second[2]).to.equal(0x41); // the LED block must not be a response
+		await expect(conn.receiveFrame(200)).to.be.rejectedWith("Unsupported LED-appended frame layout");
 	});
 
 	it("normalizes the documented in-frame LED append without waiting (issue #88)", async () => {
@@ -414,26 +411,17 @@ describe("appended LED status (issue #67)", () => {
 		expect(result.equals(Buffer.from([0x02, 0xff, 0x53, 0xac]))).to.equal(true);
 	});
 
-	it("keeps an in-flight legacy external L block out of the base frame (issue #88)", async () => {
+	it("rejects an in-flight legacy external L block instead of guessing (issue #88)", async () => {
 		const live = veBusFrame(0x41, [
 			0x10, 0x10, 0x00, 0x00, 0x04,
 			0x1f, 0x00, 0xa0, 0x00,
 			0x1f, 0x00,
 			0x00, 0x00, 0x67,
 		], 0x8f);
-		const expected = Buffer.from(live);
-		expected[0] &= 0x7f;
-		// The external block trails the frame on the wire: it is not available
-		// when the base frame completes, and its trailing 0x00 arrives later.
 		const fake = new InFlightReadSerial([Buffer.from([0x4c, 0x10, 0x00]), Buffer.from([0x00])]);
 		fake.push(live);
 		const conn = connWith(fake);
-		const base = await conn.receiveFrame(500);
-		expect(base.equals(expected)).to.equal(true);
-		const next = mk2Frame(0x41, [0x01, 0x00]);
-		fake.push(next);
-		const second = await conn.receiveFrame(500);
-		expect(second.equals(next)).to.equal(true);
+		await expect(conn.receiveFrame(500)).to.be.rejectedWith("Unsupported LED-appended frame layout");
 	});
 });
 

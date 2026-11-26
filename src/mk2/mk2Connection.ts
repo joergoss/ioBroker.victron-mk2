@@ -354,15 +354,12 @@ export class Mk2Connection {
 			// checksum was already verified over the raw byte.
 			frame[0] &= 0x7f;
 			if (ledAppended) {
-				// Appendix 1 carries LED on/blink inside the checksummed frame.
-				// A legacy firmware instead sends a separate external L block;
-				// consume it when it arrives, otherwise strip the in-frame bytes (#88).
-				if (!(await this.discardAppendedLedStatus())) {
-					if (frame.length < 5) {
-						await this.fail("protocol", "LED-appended frame too short");
-					}
-					frame = this.removeInFrameLedStatus(frame);
+				// Only the documented in-frame layouts are accepted. Do not guess
+				// between an external legacy L block and payload bytes (#88).
+				if (!this.isSupportedInFrameLedLayout(frame)) {
+					await this.fail("protocol", "Unsupported LED-appended frame layout");
 				}
+				frame = this.removeInFrameLedStatus(frame);
 			}
 			return frame;
 		}
@@ -370,45 +367,18 @@ export class Mk2Connection {
 		throw new Error("unreachable");
 	}
 
-	/**
-	 * Consume a legacy external L block after a frame with the LED bit.
-	 *
-	 * The block follows the base frame immediately on the wire, so probe briefly
-	 * for its first byte instead of assuming the frame carries the documented
-	 * in-frame bytes. Returns true only when an external block was consumed.
-	 */
-	private async discardAppendedLedStatus(): Promise<boolean> {
-		const probeEnd = Date.now() + 25;
-		while (this.rxBuffer.length < 1 && Date.now() < probeEnd) {
-			const chunk = this.port.readAvailable();
-			if (chunk) {
-				this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
-			} else {
-				await sleep(5);
-			}
-		}
-		if (this.rxBuffer.length < 1 || this.rxBuffer[0] != 0x4c) {
-			return false;
-		}
-		// Older firmware appends a trailing 0x00 that would otherwise be read as
-		// the next frame length (0 -> protocol error). Read the whole block so a
-		// split 4-byte variant does not leave that byte behind.
-		const blockEnd = Date.now() + 25;
-		while (this.rxBuffer.length < 4 && Date.now() < blockEnd) {
-			const chunk = this.port.readAvailable();
-			if (chunk) {
-				this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
-			} else {
-				await sleep(5);
-			}
-		}
-		if (this.rxBuffer.length < 3) {
-			await this.fail("timeout", "Timeout while receiving appended LED status block");
-		}
-		const consume = this.rxBuffer.length >= 4 && this.rxBuffer[3] == 0x00 ? 4 : 3;
-		this.log.debug("discarding external LED status block");
-		this.rxBuffer = this.rxBuffer.slice(consume);
-		return true;
+	/** Validate the documented in-frame LED layout before stripping payload bytes. */
+	private isSupportedInFrameLedLayout(frame: Buffer): boolean {
+		const len = frame[0] & 0x7f;
+		const marker = frame[1];
+		const command = frame[2];
+		// Appendix 1: S acknowledgement + LED-on + LED-blink + checksum.
+		if (marker === 0xff && command === 0x53 && len === 4) return true;
+		// Validated extended F5 layout (base 0x0F + two in-frame LED bytes).
+		if (marker === 0x41 && len === 0x11) return true;
+		// Long setting-info base 0x0D/0x0E + two in-frame LED bytes.
+		if (marker === 0xff && command === 0x57 && (len === 0x0f || len === 0x10)) return true;
+		return false;
 	}
 
 	/** Strip the documented in-frame LED on/blink bytes and rebuild the base frame. */
