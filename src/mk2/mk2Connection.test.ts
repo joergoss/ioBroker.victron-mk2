@@ -500,11 +500,14 @@ describe("appended LED status (issue #67)", () => {
 
 	it("rejects a legacy external LED block that arrives after the base frame", async () => {
 		const base = Buffer.from("8f4110000000041f00a0006400300000c9", "hex");
-		const fake = new FakeMk2Serial();
+		// A wall-clock delay races the 30 ms detection grace: under load the
+		// timer can fire after it. Release the block as soon as the base frame
+		// was handed out so the scenario stays deterministic.
+		const fake = new DelayedBlockSerial(base.length, Buffer.from([0x4c, 0x01, 0x00]));
 		fake.push(base);
-		setTimeout(() => fake.push(Buffer.from([0x4c, 0x01, 0x00])), 20);
 		const conn = connWith(fake);
 		await expect(conn.receiveFrame(200)).to.be.rejectedWith("Unsupported LED-appended frame layout");
+		expect(fake.blockReleased).to.equal(true);
 		expect(conn.protocolErrors).to.equal(1);
 	});
 

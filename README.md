@@ -59,7 +59,7 @@ change after a reboot.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `portPath` | – | Serial port of the MK2-USB/MK3-USB interface. |
-| `interval` | `2` | Seconds between two complete polls. A poll that takes longer than the interval is followed immediately by the next one. |
+| `interval` | `2` | Seconds between two complete polls. A poll that takes longer than the interval is followed immediately by the next one. Values outside 1-3600 s fall back to `2`. |
 | `responseTimeout` | `5000` | Maximum wait time in milliseconds for one MK2 frame. The protocol recommends 500 ms; long MK2 frames and busy hosts need more headroom. F5 (MasterMultiLED) reads wait at least 2000 ms even when a shorter value is configured. |
 
 The adapter opens the port with **2400 baud** and sets DTR as required by the
@@ -158,8 +158,9 @@ accepted it and a readback matched.
 ## Documentation and verification
 
 Development notes, protocol coverage and hardware test reports are in
-[`docs/`](docs/). The latest step-by-step MK2 3.14 acceptance, including the
-154-check read-only matrix and reversible live-write results, is documented in
+[`docs/`](docs/). The step-by-step MK2 3.14 acceptance for release 0.4.8,
+including the 154-check read-only matrix and reversible live-write results, is
+documented in
 [`docs/protocol-acceptance-2026-11-26.md`](docs/protocol-acceptance-2026-11-26.md).
 The follow-up remediation of the 18 findings from the renewed v0.4.8 audit is
 documented with 316 regression tests and the final 154-check/21-step hardware

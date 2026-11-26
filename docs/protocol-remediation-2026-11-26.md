@@ -78,9 +78,11 @@ W05/W06, W36-Skalierungen, L, F5, F0 und F1 sowie RAM-Metadaten/-Werte für IDs
 - Sync-Fehler: **0**
 - Prüfsummenfehler: **0**
 
-Die realen F5-Frames melden an den beiden bekannten Kandidatenpositionen
-`0x32` und `0x77`; beide bedeuten Switch On. Damit ist auch der generische
-Common-Bits-Pfad vor einer erneuten Firmwareidentifikation abgedeckt.
+Die realen F5-Frames tragen an den beiden bekannten Kandidatenpositionen die
+Werte `0x32` und `0x77`; beide bedeuten Switch On. Der generische
+Common-Bits-Pfad für übereinstimmende Kandidaten ist zusätzlich durch einen
+Regressionstest abgedeckt; vor bekannter Firmware wird eine abweichende
+Kandidatenbedeutung konservativ abgelehnt.
 
 Bericht auf dem Testsystem: `/tmp/mk2-audit-v048-readonly.json`.
 

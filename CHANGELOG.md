@@ -12,9 +12,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   distinguish special 0 A from a device-minimum readback, including cold
   starts and reconnects. A positive limit from Inverter only confirms the
   measured 1909209 transition to On. Generic F5 trailing bytes no longer
-  replace the documented switch register, while the captured 1909209 layout
-  remains supported, including Off recovery before firmware identification
-  (#108, #109, #110, #119).
+  replace the documented switch register. The captured 1909209 layout is used
+  once that firmware is identified; while it is unknown, an extended layout is
+  only accepted when its candidate registers agree (#108, #109, #110, #119).
 - **Long-Winmon setting writes**: cold 0 A setpoints are preserved after
   restart/reconnect. The preparatory S frame no longer carries an EEPROM-flags
   byte and is itself read back before W33/W34. Unsupported pre-reads and
@@ -30,9 +30,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Adapter lifecycle and metadata**: unknown AC1 configuration no longer
   creates a maximum-current default, Off-dropped controls report/reconcile
   their outcome using an atomic queue snapshot whose unprocessed power-on
-  retries survive failed reads, oversized poll intervals are
-  rejected, and shutdown cancels serial opens, receive loops and each pending
-  state write without post-unload activity (#118, #120, #121, #122).
+  retries survive failed reads, poll intervals outside 1-3600 s fall back to
+  the default, and shutdown cancels serial opens, receive loops and each
+  pending state write without post-unload activity (#118, #120, #121, #122).
 
 ## 0.4.8 (2026-11-26)
 
