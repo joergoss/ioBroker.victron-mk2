@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "victron-mk2",
-    "version": "0.4.3",
+    "version": "0.4.4",
     "news": {
+      "0.4.4": {
+        "en": "Correct extended F5 switch decoding and setting 63 bias handling from live protocol captures (#85/#86)",
+        "de": "Erweiterte F5-Switch-Dekodierung und Setting-63-Offset aus Live-Protokollframes korrigiert (#85/#86)",
+        "ru": "Исправлены декодирование расширенного переключателя F5 и смещение настройки 63 по живым кадрам (#85/#86)",
+        "pt": "Corrigidos a decodificação do interruptor F5 estendido e o desvio da configuração 63 com capturas reais (#85/#86)",
+        "nl": "Uitgebreide F5-schakelaardecodering en Setting-63-bias gecorrigeerd met live protocolframes (#85/#86)",
+        "fr": "Correction du décodage du commutateur F5 étendu et du biais du réglage 63 à partir de captures réelles (#85/#86)",
+        "it": "Corrette la decodifica dello switch F5 esteso e il bias dell’impostazione 63 con frame reali (#85/#86)",
+        "es": "Corregidos la decodificación del interruptor F5 extendido y el sesgo del ajuste 63 con capturas reales (#85/#86)",
+        "pl": "Poprawiono dekodowanie rozszerzonego przełącznika F5 i przesunięcie ustawienia 63 na podstawie rzeczywistych ramek (#85/#86)",
+        "uk": "Виправлено декодування розширеного перемикача F5 та зміщення налаштування 63 за живими кадрами (#85/#86)",
+        "zh-cn": "根据真实协议帧修复扩展 F5 开关解码和设置 63 偏移处理 (#85/#86)"
+      },
       "0.4.3": {
         "en": "Fix Off-state polling and power-on recovery, failed-poll diagnostics and F5 timeout handling (#81-#83)",
         "de": "Off-Polling und Power-on-Recovery, Fehlerdiagnose nach Polls und F5-Timeout-Behandlung korrigiert (#81-#83)",
