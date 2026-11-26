@@ -36,9 +36,11 @@ function settingRawValue(info, display) {
 /**
  * Collects the five W frames of a CommandGetSettingInfo answer.
  *
- * Responses 0x89 (Sc), 0x8A (Offset), 0x8B (Default), 0x8C (Minimum), 0x8D
- * (Maximum) arrive as 3-byte W frames, up to three of them packed into one MK2
- * frame. When Sc = 0 the setting is unsupported and nothing else follows.
+ * Legacy Winmon firmware packs responses 0x89 (Sc), 0x8A (Offset), 0x8B
+ * (Default), 0x8C (Minimum) and 0x8D (Maximum) as 3-byte groups, up to three
+ * per MK2 frame. Long-Winmon firmware answers with one flat frame instead; the
+ * accepted layouts are documented in addFrame. When Sc = 0 the setting is
+ * unsupported and nothing else follows.
  */
 class SettingInfoCollector {
     constructor(id, longMode = false) {
