@@ -7,6 +7,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Effective control confirmation**: 0 A/Invert commands now require main
+  state 4/5/6 and grid mode requires 7/8/9, with unambiguous F5 readback and
+  delayed limit confirmation in the same bounded loop. Direct switch writes
+  verify their limit too. All 0 A paths share the PowerAssist guard, including
+  Off recovery. Lost S acknowledgements and post-write transport failures are
+  non-retryable, grid readback stays below the queue TTL, and positive
+  sub-resolution limits clamp to 0.1 A rather than becoming special 0 A (issue
+  #101).
+- **Independent telemetry and metadata**: unsupported scalings no longer blank
+  valid peer values. DMC-dedicated limit bytes are ignored and cannot be used
+  for writes. Ambiguous extended F5 frames expose only proven switch bits, and
+  the value-free 0x8E exception now requires its exact live frame length (issue
+  #102).
+- **Forced charge states**: known pre-400 firmware and unsupported commands
+  are rejected without retry; delayed W0E responses are verified against the
+  documented Equalise/Forced-Absorption/Float sub-states without repeating the
+  write. Control reconciliation maps device sub-states 7/6/3 back to commands
+  1/2/3. Unit-tested only; no live charge-state forcing (issue #103).
+- **Direct Inverter-only control**: `set_switch_state(2)` now writes the
+  required 0 A setpoint instead of `0xFFFF`, preventing an ignored limit from
+  cancelling zero-grid and returning the device to On. States 1/3 still restore
+  the configured/current positive limit (issue #100).
+- **Switch-state readback**: refresh W0E and F5 together and allow up to
+  15 seconds for state-changing S commands; live 1909209 took about 9 seconds
+  to return to Bypass. Grid modes confirm their target switch state without
+  repeating S, while zero-grid accepts the documented Invert result (issue #98).
+- **Extended F5 candidate selection**: when all plausible register candidates
+  decode to the same new switch state, adopt it instead of retaining a stale
+  state that none of the candidates supports (issue #99).
 - **Unsupported RAM responses**: value-free 0x8E replies now mean unsupported
   variable, so metadata parsing and the null read path work without issuing W30
   (issue #97).

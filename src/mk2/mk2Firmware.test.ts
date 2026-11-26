@@ -60,8 +60,22 @@ describe("firmware-dependent behaviour (live findings 2026-11-15)", () => {
 		const p = protocolWith(fake);
 		await p.poll();
 		expect(p.mk2Model["dc_info.ubat"].value).to.equal(null);
-		expect(p.mk2Model["dc_info.ibat_net"].value).to.equal(null);
+		expect(p.mk2Model["dc_info.ibat_net"].value).to.equal(0);
+		expect(p.mk2Model["dc_info.ibat"].value).to.equal(0);
+		expect(p.mk2Model["dc_info.finv"].value).to.equal(50);
 		expect(p.mk2Model["info.connection"].value).to.equal(true);
+	});
+
+	it("keeps independent DC voltage when only current scaling is missing (issue #102)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.ramInfoOverrides.set(5, { sc: 0, offset: 0 }); // IBat not supported
+		const p = protocolWith(fake);
+		await p.poll();
+		expect(p.mk2Model["dc_info.ubat"].value).to.be.closeTo(13.02, 0.01);
+		expect(p.mk2Model["dc_info.ibat"].value).to.equal(null);
+		expect(p.mk2Model["dc_info.icharge"].value).to.equal(null);
+		expect(p.mk2Model["dc_info.ibat_net"].value).to.equal(null);
+		expect(p.mk2Model["dc_info.finv"].value).to.equal(50);
 	});
 
 	it("publishes null AC values when their scalings are unsupported", async () => {
@@ -70,6 +84,20 @@ describe("firmware-dependent behaviour (live findings 2026-11-15)", () => {
 		const p = protocolWith(fake);
 		await p.poll();
 		expect(p.mk2Model["ac_info.umains"].value).to.equal(null);
+		expect(p.mk2Model["ac_info.uinv"].value).to.equal(0);
+		expect(p.mk2Model["ac_info.imains"].value).to.not.equal(null);
+		expect(p.mk2Model["ac_info.fmains"].value).to.equal(50);
+	});
+
+	it("keeps independent AC values when only mains-period scaling is missing (issue #102)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.ramInfoOverrides.set(8, { sc: 0, offset: 0 });
+		const p = protocolWith(fake);
+		await p.poll();
+		expect(p.mk2Model["ac_info.fmains"].value).to.equal(null);
+		expect(p.mk2Model["ac_info.umains"].value).to.equal(237);
+		expect(p.mk2Model["ac_info.uinv"].value).to.equal(0);
+		expect(p.mk2Model["ac_info.imains"].value).to.not.equal(null);
 	});
 });
 

@@ -265,9 +265,10 @@ class VictronMk2 extends utils.Adapter {
                     this.log.warn("device is Off: only switch_state/grid_mode writes are allowed, other control writes dropped");
                 }
                 const hadPowerOnRequest = this.toSendQueue.length > 0;
-                const needsPowerAssist = this.toSendQueue.some((item) => item.name === "control.grid_mode" && (item.value === 1 || item.value === 2));
+                const needsPowerAssist = this.toSendQueue.some((item) => (item.name === "control.grid_mode" && (item.value === 1 || item.value === 2))
+                    || (item.name === "control.switch_state" && item.value === 2));
                 if (needsPowerAssist) {
-                    // Modes 1/2 need AssistEnabled for their 0 A safety validation.
+                    // Grid modes 1/2 and direct switch 2 need AssistEnabled for 0 A validation.
                     // Read just Flags0 instead of restoring the full-poll dependency.
                     await mk2.get_flags();
                 }
@@ -461,7 +462,16 @@ class VictronMk2 extends utils.Adapter {
         switch (name) {
             case "control.set_assist": return num("assist.limit");
             case "control.switch_state": return num("switch.state");
-            case "control.force_state": return num("state.substate");
+            case "control.force_state": {
+                const encodedState = num("state.state");
+                const subState = num("state.substate");
+                if (encodedState === undefined || subState === undefined)
+                    return undefined;
+                if (Math.floor(encodedState / 10) !== 9)
+                    return 0;
+                // Device charge sub-states differ from the public command values.
+                return subState === 7 ? 1 : subState === 6 ? 2 : subState === 3 ? 3 : 0;
+            }
             case "control.grid_mode": {
                 const switchState = num("switch.state");
                 const limit = num("assist.limit");

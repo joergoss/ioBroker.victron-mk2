@@ -157,8 +157,22 @@ export class FakeMk2Connection {
 	requests: Buffer[] = [];
 	limit = 16;
 	switchState = 3;
+	/** Delay applying the requested switch register to model delayed hardware transitions. */
+	switchUpdateDelayMs = 0;
+	/** Delay only the effective input-current limit, independently of switch/main state. */
+	limitUpdateDelayMs = 0;
+	/** Model §5 note 3: a 0 A On request selects Inverter only with PowerAssist. */
+	zeroLimitSelectsInverter = true;
+	/** Use the extended 0x0F F5 layout observed on firmware 1909209. */
+	extendedMasterMultiLedFrame = false;
+	/** Update the main state together with the panel switch, as the live device does. */
+	linkMainStateToSwitch = true;
 	currentState = 8;
 	currentSubState = 0;
+	/** Delay applying W0E force commands to model §7.3.2 readback latency. */
+	forceStateDelayMs = 0;
+	/** Simulate firmware answering force commands with 0x80 Unknown command. */
+	forceStateSupported = true;
 	bfFactor = 1;
 	dcMarker = 0xB5;
 	dcPhase = 0x0c;
@@ -172,6 +186,8 @@ export class FakeMk2Connection {
 	acPhase = 0x08;
 	switchRegister = 0b00110000; // SwitchCharge + SwitchInvert -> On
 	masterMultiLedHasRegister = true;
+	/** Set the F5 DMC-dedicated bit; current-limit bytes must then be ignored. */
+	dmcDedicated = false;
 	flags0 = (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8) | (1 << 11);
 	flags1 = 0;
 	/** Settings that the fake device does not support (Sc = 0 / 0x91). */
@@ -196,6 +212,8 @@ export class FakeMk2Connection {
 	minimalUnsupportedSettingResponses = false;
 	/** Omit value bytes in unsupported RAM responses, as observed on 1909209. */
 	minimalUnsupportedRamResponses = false;
+	/** Emit a malformed 0x8E response with one arbitrary payload byte. */
+	truncatedRamInfo = false;
 	/** Protocol §5 FlagsExt0 bit 0: MK2 converts long Winmon frames to short. */
 	shortWinmonCompatibility = false;
 	/** Simulate 1909209 rejecting legacy setting writes while in long mode. */
@@ -216,6 +234,8 @@ export class FakeMk2Connection {
 	syncErrors = 0;
 	lastError = "";
 	failNext?: string;
+	/** Apply request side effects, then lose the response/ACK. */
+	failAfterApplied?: string;
 
 	private settingInfo(id: number): FakeSettingInfo {
 		const override = this.settingInfoOverrides.get(id);
@@ -254,20 +274,36 @@ export class FakeMk2Connection {
 				data[1] = 0x00;
 				return [mk2Frame(0x4C, data)];
 			}
-			case 0x53: // S
-				this.switchState = request[3];
-				// Keep the F5 register consistent with the S panel state; live
-				// hardware reflects the write in the next MasterMultiLED frame.
-				this.switchRegister = request[3] === 1 ? 0b00010000
-					: request[3] === 2 ? 0b00100000
-						: request[3] === 3 ? 0b00110000 : 0;
-				if (!this.ignoreAssistWrites) {
-					this.limit = (request[5] << 8 | request[4]) / 10;
-				}
+			case 0x53: { // S
+				const applySwitchState = (): void => {
+					const requestedLimit = request[4] | (request[5] << 8);
+					const state = this.zeroLimitSelectsInverter && (request[3] === 1 || request[3] === 3) && requestedLimit === 0 ? 2 : request[3];
+					this.switchState = state;
+					// Keep the F5 register consistent with the S panel state; live
+					// hardware reflects the write in the next MasterMultiLED frame.
+					this.switchRegister = state === 1 ? 0b00010000
+						: state === 2 ? 0b00100000
+							: state === 3 ? 0b00110000 : 0;
+					if (this.linkMainStateToSwitch) {
+						this.currentState = state === 2 ? 4 : state === 4 ? 2 : 8;
+						this.currentSubState = 0;
+					}
+				};
+				if (this.switchUpdateDelayMs > 0) setTimeout(applySwitchState, this.switchUpdateDelayMs);
+				else applySwitchState();
+				const requestedLimit = request[4] | (request[5] << 8);
+				const applyLimit = (): void => {
+					if (!this.ignoreAssistWrites && requestedLimit < 0x8000) {
+						this.limit = requestedLimit / 10;
+					}
+				};
+				if (this.limitUpdateDelayMs > 0) setTimeout(applyLimit, this.limitUpdateDelayMs);
+				else applyLimit();
 				if (request.length > 10 && request[9] === 0x01) {
 					this.shortWinmonCompatibility = true;
 				}
 				return [mk2Frame(0x53, [])];
+			}
 			case 0x46: { // F
 				const frameType = request[3];
 				if (frameType == 0x00) {
@@ -292,6 +328,12 @@ export class FakeMk2Connection {
 						0x1F, 0x00, 0xA0, 0x00,
 						Math.round(this.limit * 10) & 0xFF, Math.round(this.limit * 10) >> 8,
 					];
+					if (this.dmcDedicated) {
+						data[4] |= 0x08;
+					}
+					if (this.extendedMasterMultiLedFrame) {
+						data.push(0x00, 0x00);
+					}
 					if (this.masterMultiLedHasRegister) {
 						data.push(this.switchRegister);
 					}
@@ -307,10 +349,17 @@ export class FakeMk2Connection {
 					if (state == 0) {
 						return [mk2Frame(0x57, [0x94, this.currentState, this.currentSubState])];
 					}
-					// force_state: 1 equalise, 2 absorption, 3 float -> charge state 9
-					const forced: { [key: number]: number } = { 1: 7, 2: 2, 3: 3 };
-					this.currentState = 9;
-					this.currentSubState = forced[state] ?? 0;
+					if (!this.forceStateSupported) {
+						return [mk2Frame(0x57, [0x80, 0x00])];
+					}
+					// force_state: 1 equalise, 2 forced absorption, 3 float -> charge state 9
+					const forced: { [key: number]: number } = { 1: 7, 2: 6, 3: 3 };
+					const applyForcedState = (): void => {
+						this.currentState = 9;
+						this.currentSubState = forced[state] ?? 0;
+					};
+					if (this.forceStateDelayMs > 0) setTimeout(applyForcedState, this.forceStateDelayMs);
+					else applyForcedState();
 					return [mk2Frame(0x57, [0x94, this.currentState, this.currentSubState])];
 				}
 				if (sub == 0x05 || sub == 0x06) {
@@ -420,6 +469,9 @@ export class FakeMk2Connection {
 						offset = override.offset;
 					}
 					if (sc == 0) {
+						if (this.truncatedRamInfo) {
+							return [mk2Frame(0x57, [0x8e, 0x01])];
+						}
 						if (this.minimalUnsupportedRamResponses) {
 							return [mk2Frame(0x57, [0x8e])];
 						}
@@ -465,9 +517,17 @@ export class FakeMk2Connection {
 		}
 	}
 
+	private afterApplied(request: Buffer): void {
+		if (this.failAfterApplied && request.toString("hex").includes(this.failAfterApplied)) {
+			this.failAfterApplied = undefined;
+			throw new Mk2TransportError("simulated lost response after applied request");
+		}
+	}
+
 	async communicate(request: Buffer, decode: (response: Buffer) => Promise<void>): Promise<void> {
 		this.before(request);
 		const frames = this.respond(request);
+		this.afterApplied(request);
 		await decode(frames[0]);
 	}
 

@@ -67,6 +67,8 @@ describe("round 4 protocol findings", () => {
 		const fake = new FakeMk2Connection();
 		fake.ignoreAssistWrites = true;
 		const p = protocolWith(fake);
+		p.gridModeReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
 		await p.master_multi_led_info();
 		await expect(p.set_assist(0)).to.be.rejectedWith("0 A was not applied");

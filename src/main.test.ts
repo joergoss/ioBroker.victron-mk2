@@ -300,7 +300,7 @@ describe("adapter lifecycle", () => {
 	});
 
 	it("loads Flags0 for Off grid modes that need PowerAssist (issues #82, #83)", async () => {
-		for (const [mode, expectedSwitch] of [[1, 3], [2, 2]]) {
+		for (const [mode, expectedSwitch] of [[1, 2], [2, 2]]) {
 			const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
 			const fake = new FakeMk2Connection();
 			fake.currentState = 2;
@@ -319,6 +319,26 @@ describe("adapter lifecycle", () => {
 			expect(adapter.states["setting.flag.AssistEnabled"].val).to.equal(true);
 			expect(adapter.toSendQueue).to.have.length(0);
 		}
+	});
+
+	it("loads Flags0 for Off direct Inverter-only recovery (issue #101)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [{ name: "control.switch_state", value: 2, attempts: 0 }];
+		protocol.poll = async () => {
+			throw new Error("full poll must not be required");
+		};
+
+		await adapter.updateStates();
+
+		expect(fake.switchState).to.equal(2);
+		expect(adapter.states["setting.flag.AssistEnabled"].val).to.equal(true);
+		expect(adapter.toSendQueue).to.have.length(0);
 	});
 
 	it("rejects Off grid-mode recovery when the panel register is missing (issue #83)", async () => {
@@ -378,6 +398,17 @@ describe("adapter lifecycle", () => {
 		await adapter.updateStates();
 
 		expect(adapter.states["control.switch_state"]).to.include({ val: 3, ack: true });
+	});
+
+	it("maps forced charge sub-states back to public force_state values (issue #103)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		adapter.modelPopulated = true;
+		adapter.mk2 = new Mk2Protocol("fake", adapter.log, asConnection(new FakeMk2Connection()));
+		for (const [encoded, subState, expected] of [[97, 7, 1], [96, 6, 2], [93, 3, 3], [92, 2, 0], [80, 0, 0]]) {
+			adapter.mk2.mk2Model["state.state"].value = encoded;
+			adapter.mk2.mk2Model["state.substate"].value = subState;
+			expect(adapter.actualControlValue("control.force_state")).to.equal(expected);
+		}
 	});
 
 	it("stops all follow-up work after a failed full poll (issue #82)", async () => {

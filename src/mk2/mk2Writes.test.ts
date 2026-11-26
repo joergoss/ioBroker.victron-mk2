@@ -133,6 +133,8 @@ describe("long Winmon firmware writes (1909209)", () => {
 		await p.writeSetting(0, 0x89f0);
 		expect(fake.shortWinmonCompatibility).to.equal(true);
 		expect(fake.flags0).to.equal(0x89f0);
+		expect(fake.limit).to.equal(16);
+		expect(fake.switchState).to.equal(3);
 		const modeIndex = fake.requests.findIndex((r) => r[2] == 0x53 && r[9] == 0x01);
 		const writeIndex = fake.requests.findIndex((r) => r[2] == 0x57 && r[3] == 0x33);
 		expect(modeIndex).to.be.greaterThanOrEqual(0);

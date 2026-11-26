@@ -87,6 +87,15 @@ describe("Mk2Protocol RAM telemetry (issue #6)", () => {
 		expect(fake.requests.filter((r) => r[3] == 0x30).length).to.equal(0);
 	});
 
+	it("rejects a truncated 0x8E response with arbitrary payload (issue #102)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.truncatedRamInfo = true;
+		fake.ramInfoOverrides.set(10, { sc: 0, offset: 0 });
+		const p = protocolWith(fake);
+		await expect(p.readRamVar(10)).to.be.rejectedWith("incomplete scale response");
+		expect(fake.requests.filter((r) => r[3] == 0x30).length).to.equal(0);
+	});
+
 	it("a full poll contains power and SOC states", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);
