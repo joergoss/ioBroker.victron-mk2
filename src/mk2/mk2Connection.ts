@@ -130,7 +130,10 @@ export class Mk2Connection {
 		}
 		this.synced = false;
 		// A failed sync is a transport failure and must be visible in diag.* (N10).
-		await this.fail("sync", "Sync - receive no version frame - no mk2 connected ?");
+		const message = this.mk2Mode === 0x57
+			? "MK2 reports VE 9-bit mode instead of VE.Bus"
+			: "Sync - receive no version frame - no mk2 connected ?";
+		await this.fail("sync", message);
 	}
 
 	/** Find a complete, checksum-valid 'V' frame anywhere in the rx buffer. */
@@ -142,7 +145,9 @@ export class Mk2Connection {
 				continue;
 			}
 			const len = buf[i] & 0x7f;
-			if (len < 5) {
+			if (len < 7) {
+				// §3.4 requires V + four version bytes + mode. Shorter frames are
+				// malformed and must never be accepted as synchronized (#91).
 				continue;
 			}
 			const total = len + 2;
@@ -162,6 +167,12 @@ export class Mk2Connection {
 			this.mk2Version = (frame[3] | (frame[4] << 8) | (frame[5] << 16) | (frame[6] << 24)) >>> 0;
 			this.mk2Mode = frame[7];
 			this.rxBuffer = buf.slice(i + total);
+			if (this.mk2Mode === 0x57) {
+				// Mode W is VE 9-bit RS485, not VE.Bus. Keep scanning for a valid
+				// later VE.Bus frame, but never declare operational sync here.
+				this.log.warn("MK2 reports VE 9-bit mode; VE.Bus sync required");
+				continue;
+			}
 			return true;
 		}
 		if (incompleteAt !== null) {
@@ -201,10 +212,9 @@ export class Mk2Connection {
 	 *
 	 * The MK2 packs up to three 3-byte Winmon frames into one MK2 frame, so a
 	 * command like CommandGetSettingInfo (five responses) arrives as several MK2
-	 * frames. `decode` returns true once the answer is complete. With
-	 * `allowQuietEnd` a read timeout after at least one decoded frame ends the
-	 * exchange instead of failing, because older firmware legitimately sends
-	 * fewer responses than the current protocol describes.
+	 * frames. `decode` returns true once the answer is complete. The legacy
+	 * `allowQuietEnd` option is ignored: transport failures always propagate,
+	 * including after a partial response (issue #92).
 	 */
 	async communicateMulti(
 		request: Buffer,
@@ -225,14 +235,16 @@ export class Mk2Connection {
 		options: { allowQuietEnd?: boolean; readTimeoutMs?: number } = {},
 	): Promise<void> {
 		this.busy = true;
-		let decoded = 0;
 
 		try {
-			await this.ensureSynced();
-			await this.discardInput();
-
-			this.frame_debug("SEND ->", request);
-			await this.port.write(request);
+			try {
+				await this.ensureSynced();
+				await this.discardInput();
+				this.frame_debug("SEND ->", request);
+				await this.port.write(request);
+			} catch (error) {
+				return await this.failIo("serial setup/write", error);
+			}
 
 			const deadline = Date.now() + Math.max(2000, 2 * this.responseTimeoutMs);
 			while (Date.now() < deadline) {
@@ -240,11 +252,9 @@ export class Mk2Connection {
 				try {
 					frame = await this.receiveFrame(options.readTimeoutMs ?? this.responseTimeoutMs);
 				} catch (error) {
-					if (options.allowQuietEnd && decoded > 0) {
-						this.log.debug("communicateMulti: quiet end after " + decoded + " frame(s)");
-						return;
-					}
-					throw error;
+					// A transport error after a partial response is never a legitimate
+					// quiet end. Propagate it and keep the failed-poll I/O boundary (#92).
+					return await this.failIo("serial read", error);
 				}
 				const spezial = frame[1] as number;
 				const frameType = frame[2] as number;
@@ -263,8 +273,7 @@ export class Mk2Connection {
 					spezial == mk2SpezialFrame.masterMultiLed ||
 					spezial == mk2SpezialFrame.ramReadOk
 				) {
-					decoded++;
-					if (await decode(frame)) {
+						if (await decode(frame)) {
 						return;
 					}
 				}
@@ -382,6 +391,24 @@ export class Mk2Connection {
 			// best effort; the reopen path handles a closed or broken port
 		}
 		throw new Mk2TransportError(message);
+	}
+
+	/** Normalize open/write/read failures and force a clean resync (#89). */
+	private async failIo(operation: string, error: unknown): Promise<never> {
+		if (error instanceof Mk2TransportError) {
+			throw error;
+		}
+		const detail = error instanceof Error ? error.message : String(error);
+		this.protocolErrors++;
+		this.lastError = `${operation}: ${detail}`;
+		this.synced = false;
+		this.rxBuffer = Buffer.alloc(0);
+		try {
+			await this.port.close();
+		} catch {
+			// best effort; the next exchange reopens and resynchronises
+		}
+		throw new Mk2TransportError(this.lastError);
 	}
 
 	/**

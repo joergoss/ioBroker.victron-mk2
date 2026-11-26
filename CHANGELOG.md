@@ -3,6 +3,18 @@
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## __WORK IN PROGRESS__
+
+### Fixed
+
+- **Transport error boundaries**: serial open/write/read failures now invalidate
+  and close the connection, normalize to `Mk2TransportError` and update
+  diagnostics instead of leaving a broken connection apparently usable (#89).
+- **Partial multi-frame responses**: receive errors after an incomplete answer
+  no longer become a false quiet end; later same-poll I/O is stopped (#92).
+- **Sync protocol validation**: malformed short version frames and VE 9-bit mode
+  are rejected instead of entering VE.Bus operation and timing out (#91).
+
 ## 0.4.4 (2026-11-26)
 
 ### Fixed

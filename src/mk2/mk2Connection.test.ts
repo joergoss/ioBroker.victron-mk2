@@ -67,7 +67,7 @@ describe("Mk2Connection", () => {
 			await conn.sync();
 			expect(conn.synced).to.equal(true);
 			expect(conn.mk2Version).to.equal(0x00113e98);
-			expect(conn.mk2Mode).to.equal(0x57);
+			expect(conn.mk2Mode).to.equal(0x00);
 		});
 	});
 
@@ -375,5 +375,77 @@ describe("appended LED status (issue #67)", () => {
 		expect(first[2]).to.equal(0x41);
 		const second = await conn.receiveFrame(200);
 		expect(second[2]).to.equal(0x41); // the LED block must not be a response
+	});
+});
+
+describe("transport error boundaries (issues #89, #91, #92)", () => {
+	it("normalizes write failures and invalidates the connection (issue #89)", async () => {
+		const fake = new FakeMk2Serial();
+		fake.push(versionFrame());
+		fake.writeError = new Error("write callback failed");
+		const conn = connWith(fake);
+		let caught: unknown;
+		try {
+			await conn.communicate(mk2Frame(0x41, [0x01, 0x00]), async () => undefined);
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).to.be.instanceOf(Mk2TransportError);
+		expect((caught as Error).message).to.contain("write callback failed");
+		expect(conn.synced).to.equal(false);
+		expect(conn.protocolErrors).to.equal(1);
+		expect(conn.lastError).to.contain("write callback failed");
+		expect(fake.isOpen()).to.equal(false);
+	});
+
+	it("normalizes serial open failures (issue #89)", async () => {
+		const fake = new FakeMk2Serial();
+		fake.openError = new Error("open callback failed");
+		const conn = connWith(fake);
+		let caught: unknown;
+		try {
+			await conn.communicate(mk2Frame(0x41, [0x01, 0x00]), async () => undefined);
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).to.be.instanceOf(Mk2TransportError);
+		expect((caught as Error).message).to.contain("open callback failed");
+		expect(conn.synced).to.equal(false);
+		expect(conn.protocolErrors).to.equal(1);
+		expect(conn.lastError).to.contain("open callback failed");
+	});
+
+	it("does not turn a partial multi-frame timeout into a quiet end (issue #92)", async () => {
+		const firstFragment = mk2Frame(0x57, [0x89, 0x9c, 0x7f]);
+		const fake = new FakeMk2Serial((request) => request[2] === 0x57 ? firstFragment : null);
+		fake.push(versionFrame());
+		const conn = connWith(fake);
+		await expect(conn.communicateMulti(
+			mk2Frame(0x57, [0x35, 2, 0]),
+			async () => false,
+			{ allowQuietEnd: true, readTimeoutMs: 40 },
+		)).to.be.rejectedWith("Timeout");
+		expect(conn.synced).to.equal(false);
+		expect(conn.timeouts).to.equal(1);
+	});
+
+	it("rejects a full-length version frame in VE 9-bit mode (issue #91)", async function () {
+		this.timeout(7000);
+		const fake = new FakeMk2Serial();
+		fake.push(mk2Frame(0x56, [0x98, 0x3e, 0x11, 0x00, 0x57]));
+		const conn = connWith(fake);
+		await expect(conn.sync()).to.be.rejectedWith("VE 9-bit");
+		expect(conn.synced).to.equal(false);
+		expect(conn.syncErrors).to.equal(1);
+	});
+
+	it("rejects a version frame shorter than version plus mode (issue #91)", async function () {
+		this.timeout(7000);
+		const fake = new FakeMk2Serial();
+		fake.push(mk2Frame(0x56, [0x98, 0x3e, 0x11]));
+		const conn = connWith(fake);
+		await expect(conn.sync()).to.be.rejectedWith("no version frame");
+		expect(conn.synced).to.equal(false);
+		expect(conn.syncErrors).to.equal(1);
 	});
 });
