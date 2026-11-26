@@ -506,17 +506,27 @@ export class Mk2Protocol {
 			let switch_register: number | undefined
 			if (len === fixedIndex) {
 				switch_register = response[fixedIndex]
-			} else if (mainState === 0 || mainState === 1) {
-				// No usable main state yet: preserve the historical AC-block hint
-				// but do not narrow to Off/Charger only below.
-				switch_register = (response[3] & 0x10) !== 0 ? response[len] : response[fixedIndex]
-			} else if (mainState === 2 && len > fixedIndex) {
-				// Main-state Off does not imply panel/switch Off. In particular the
-				// low-power/standby behavior in §3.5 can combine main Off with an
-				// extended switch register that still reports On (#86). The
-				// extended register is the documented position the live frame
-				// uses, so it wins over the cached state.
+			} else if (len === 0x0f && (mainState === 0 || mainState === 1 || mainState === 2)) {
+				// The extended 0x0F layout observed on 1909209 carries the switch
+				// register as its last data byte. This remains valid before the main
+				// state is known and while main-state Off coexists with switch On.
 				switch_register = response[len]
+			} else if (mainState === 0 || mainState === 1) {
+				// No usable main state yet and no validated extended layout:
+				// preserve the historical AC-block hint without narrowing below.
+				switch_register = (response[3] & 0x10) !== 0 ? response[len] : response[fixedIndex]
+			} else if (mainState === 2) {
+				const uniqueCandidates = [...new Set(candidates)]
+				if (uniqueCandidates.length === 1) {
+					switch_register = uniqueCandidates[0]
+				} else {
+					// Other extended layouts are ambiguous. Never use the previous
+					// state to discard a non-Off register or an appended byte as a
+					// register; publish unknown instead (#86).
+					this.log.warn("master_multi_led_info: ambiguous extended frame while Off; switch state unknown");
+					this.clearSwitchModel()
+					return
+				}
 			} else {
 				const uniqueCandidates = [...new Set(candidates)]
 				const preferred = uniqueCandidates.filter(plausible)
