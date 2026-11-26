@@ -11,10 +11,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   proven F5 switch state, compare the exact raw deciamp value actually sent and
   distinguish special 0 A from a device-minimum readback, including cold
   starts and reconnects. A positive limit from Inverter only confirms the
-  measured 1909209 transition to On. Generic
-  F5 trailing bytes no longer replace the documented switch register, while the captured
-  1909209 layout remains supported, including Off recovery before firmware
-  identification (#108, #109, #110, #119).
+  measured 1909209 transition to On. Generic F5 trailing bytes no longer
+  replace the documented switch register, while the captured 1909209 layout
+  remains supported, including Off recovery before firmware identification
+  (#108, #109, #110, #119).
 - **Long-Winmon setting writes**: cold 0 A setpoints are preserved after
   restart/reconnect. The preparatory S frame no longer carries an EEPROM-flags
   byte and is itself read back before W33/W34. Unsupported pre-reads and

@@ -161,6 +161,9 @@ Development notes, protocol coverage and hardware test reports are in
 [`docs/`](docs/). The latest step-by-step MK2 3.14 acceptance, including the
 154-check read-only matrix and reversible live-write results, is documented in
 [`docs/protocol-acceptance-2026-11-26.md`](docs/protocol-acceptance-2026-11-26.md).
+The follow-up remediation of the 18 findings from the renewed v0.4.8 audit is
+documented with 316 regression tests and the final 154-check/21-step hardware
+runs in [`docs/protocol-remediation-2026-11-26.md`](docs/protocol-remediation-2026-11-26.md).
 
 ## Changelog
 
