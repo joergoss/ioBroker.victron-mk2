@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { Mk2Protocol } from "./mk2Protocol";
 import { asConnection, FakeMk2Connection } from "../test-utils/fake-mk2";
-import { settingDisplayValue, SettingInfo } from "./mk2Settings";
+import { settingDisplayValue, settingRawValue, SettingInfo } from "./mk2Settings";
 
 const log = {
 	level: "info",
@@ -48,6 +48,19 @@ describe("round 4 protocol findings", () => {
 		};
 		expect(settingDisplayValue(info, 0x8000)).to.equal(0);
 		expect(settingDisplayValue(info, 0x8003)).to.equal(3);
+		expect(settingRawValue(info, 3)).to.equal(0x8003);
+	});
+
+	it("does not double-apply the setting 63 bias carried in metadata (issue #85)", () => {
+		// Exact live metadata from 1909209: scale 0.01, offset -32768.
+		const info: SettingInfo = {
+			id: 63, supported: true, sc: -100, scale: 0.01, offset: -32768,
+			def: 0x8000, min: 31838, max: 33968,
+		};
+		expect(settingDisplayValue(info, 0x8000)).to.equal(0);
+		expect(settingDisplayValue(info, 0x8003)).to.be.closeTo(0.03, 1e-9);
+		expect(settingRawValue(info, 0)).to.equal(0x8000);
+		expect(settingRawValue(info, 0.03)).to.equal(0x8003);
 	});
 
 	it("rejects a 0 A write that leaves no visible trace", async () => {

@@ -20,12 +20,15 @@ function settingScale(sc) {
 }
 /** DisplayValue := Scale * (x + Offset) */
 function settingDisplayValue(info, raw) {
-    // Setting 63 (UBatLowPreAlarmOffset) is stored with 0x8000 as "zero".
-    const value = info.id === 63 ? raw - 0x8000 : raw;
+    // Setting 63 uses 0x8000 as its zero point. Some firmware already exposes
+    // that bias as metadata Offset=-32768; applying both would double-bias it.
+    // Offset 0 is the legacy form that still needs the explicit raw bias (#85).
+    const value = info.id === 63 && info.offset === 0 ? raw - 0x8000 : raw;
     return info.scale * (value + info.offset);
 }
 function settingRawValue(info, display) {
-    return Math.round(display / info.scale - info.offset);
+    const value = Math.round(display / info.scale - info.offset);
+    return info.id === 63 && info.offset === 0 ? value + 0x8000 : value;
 }
 /**
  * Collects the five W frames of a CommandGetSettingInfo answer.

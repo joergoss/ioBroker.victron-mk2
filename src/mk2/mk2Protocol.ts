@@ -498,7 +498,10 @@ export class Mk2Protocol {
 			const mainState = typeof stateValue === "number" ? Math.floor(stateValue / 10) : 0
 			const plausible = (register: number): boolean => {
 				const candidateState = switchStateFromRegister(register)
-				if (mainState === 2) return candidateState === 4
+				// Main-state Off does not imply panel/switch Off. In particular the
+				// low-power/standby behavior in §3.5 can combine main Off with an
+				// extended switch register that still reports On (#86).
+				if (mainState === 2) return true
 				if (mainState >= 4 && mainState <= 7) return candidateState === 2 || candidateState === 3
 				if (mainState >= 8 && mainState <= 9) return candidateState === 1 || candidateState === 3
 				return true
