@@ -485,10 +485,11 @@ export class Mk2Protocol {
 			// §6.2: the switch register follows the three limits. The documented
 			// 0x0D layout puts it at index 13. Longer answers may append or insert
 			// bytes; the live 1909209 frame (0F 41 10 10 00 00 04 1F 00 A0 00 1F
-			// 00 00 00 67 47) has it at the last data byte. Select between the
-			// candidates using the independently read state.state, never by an
-			// undocumented flag alone, and publish "unknown" instead of guessing
-			// "Off" when the candidates disagree.
+			// 00 00 00 67 47) has it at the last data byte. With a usable main
+			// state the candidates are checked against the independently read
+			// state.state, but main Off does not imply switch Off: there the
+			// extended (last) byte wins (#86). Ambiguous registers keep the
+			// already published state instead of guessing on one frame.
 			const len = response[0] & 0x7f
 			const fixedIndex = 0x0d
 			const candidates: number[] = []
