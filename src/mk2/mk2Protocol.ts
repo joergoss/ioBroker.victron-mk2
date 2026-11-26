@@ -92,6 +92,8 @@ export class Mk2Protocol {
 	private longWinmonFrames = false;
 	private shortWinmonForWrites = false;
 	private connectionGeneration = -1;
+	/** Last input-current setpoint this adapter confirmed on the device; null when unknown. */
+	private confirmedInputCurrentSetpoint: number | null = null;
 
 	/**
 	 * Drop all connection-derived caches when the MK2 resynchronised (review
@@ -110,6 +112,7 @@ export class Mk2Protocol {
 		this.deviceInfoLoaded = false;
 		this.longWinmonFrames = false;
 		this.shortWinmonForWrites = false;
+		this.confirmedInputCurrentSetpoint = null;
 		this.extendedSettingsLoaded = false;
 		this.failedExtendedSettings.clear();
 		this.unsupportedScalings.clear();
@@ -481,11 +484,13 @@ export class Mk2Protocol {
 				for (const key of ["assist.minlimit", "assist.maxlimit", "assist.limit"]) {
 					this.mk2Model[key].value = null
 				}
+				this.confirmedInputCurrentSetpoint = null
 			} else {
 				const data = bp.unpack("<H H H B", response, 7)
 				this.mk2Model["assist.minlimit"].value = data[0]/10.0
 				this.mk2Model["assist.maxlimit"].value = data[1]/10.0
 				this.mk2Model["assist.limit"].value = data[2]/10.0
+				this.reconcileConfirmedSetpoint(data[2]/10.0, data[0]/10.0)
 			}
 
 			const hasSwitchRegister = response[0] >= 0x0d && response.length >= 15;
@@ -661,6 +666,27 @@ export class Mk2Protocol {
 	}
 
 	/**
+	 * Drop the cached setpoint as soon as the device's effective limit no longer
+	 * matches it. The F5 limit is authoritative; a confirmed 0 A setpoint is
+	 * allowed to read back as the device minimum (1909209 does that).
+	 */
+	private reconcileConfirmedSetpoint(limit: number, minimum: number): void {
+		const confirmed = this.confirmedInputCurrentSetpoint
+		if (confirmed === null) {
+			return
+		}
+		if (confirmed === 0) {
+			if (limit > minimum + 0.11) {
+				this.confirmedInputCurrentSetpoint = null
+			}
+			return
+		}
+		if (Math.abs(limit - confirmed) > 0.11) {
+			this.confirmedInputCurrentSetpoint = null
+		}
+	}
+
+	/**
 	 * Send S without making a lost acknowledgement retryable. The request may
 	 * already have reached VE.Bus even when its response times out or is corrupt.
 	 */
@@ -734,6 +760,7 @@ export class Mk2Protocol {
 
 		this.log.debug("******   set_assist");
 
+		this.confirmedInputCurrentSetpoint = null
 		await this.sendS("set_assist", data)
 
 		if (ampere === 0) {
@@ -763,6 +790,7 @@ export class Mk2Protocol {
 		const appliedLimit = ampere === 0 ? 0 : this.mk2Model["assist.limit"].value
 		const appliedValue = typeof appliedLimit === "number" ? appliedLimit : ampere
 		this.mk2Model["control.set_assist"].value = appliedValue
+		this.confirmedInputCurrentSetpoint = appliedValue
 		return appliedValue
 	}
 
@@ -798,6 +826,9 @@ export class Mk2Protocol {
 			throw new Mk2ValidationError("set_switch_state: input-current limit is unavailable in DMC-dedicated mode (§6.2)")
 		}
 		const data = Buffer.from([state, limit & 0xFF, (limit >> 8) & 0xFF, 0x01, 0x80])
+		if (limit < 0x8000) {
+			this.confirmedInputCurrentSetpoint = null
+		}
 		await this.sendS("set_switch_state", data)
 		// The S frame is only an acknowledgement. Verify the effective state
 		// through bounded W0E/F5 readback; live transitions can take several seconds.
@@ -809,6 +840,9 @@ export class Mk2Protocol {
 			state === 2 ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs,
 			limit < 0x8000 ? limit : undefined,
 		)
+		if (limit < 0x8000) {
+			this.confirmedInputCurrentSetpoint = limit / 10
+		}
 		return state
 	}
 
@@ -1081,9 +1115,28 @@ export class Mk2Protocol {
 			return;
 		}
 		const limit = this.mk2Model["assist.limit"].value
-		const rawLimit = this.currentSwitchState === 2
-			? 0
-			: typeof limit === "number" && limit > 0 ? Math.round(limit * 10) : 0xFFFF
+		const minimum = this.mk2Model["assist.minlimit"].value
+		let rawLimit: number
+		if (this.currentSwitchState === 2) {
+			rawLimit = 0
+		} else if (this.currentSwitchState === 4) {
+			rawLimit = typeof limit === "number" && limit > 0 ? Math.round(limit * 10) : 0xFFFF
+		} else if (this.confirmedInputCurrentSetpoint !== null) {
+			rawLimit = Math.round(this.confirmedInputCurrentSetpoint * 10)
+		} else if (typeof limit === "number" && limit > 0) {
+			if (typeof minimum === "number" && minimum > 0 && Math.abs(limit - minimum) <= 0.11) {
+				throw new Mk2ValidationError("prepareSettingWrite: input-current setpoint is unknown (device reports its minimum); refusing the setting write")
+			}
+			rawLimit = Math.round(limit * 10)
+		} else {
+			rawLimit = 0xFFFF
+		}
+		if (rawLimit < 0x8000 && !this.inputCurrentLimitsValid) {
+			throw new Mk2ValidationError("prepareSettingWrite: input-current limit is unavailable in DMC-dedicated mode (§6.2)")
+		}
+		if (rawLimit === 0) {
+			this.requirePowerAssistForZeroLimit("prepareSettingWrite")
+		}
 		const data = Buffer.from([
 			this.currentSwitchState, rawLimit & 0xFF, (rawLimit >> 8) & 0xFF, 0x01, 0x80,
 			0x00, 0x01, 0x00,

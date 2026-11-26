@@ -163,6 +163,8 @@ export class FakeMk2Connection {
 	limitUpdateDelayMs = 0;
 	/** Model §5 note 3: a 0 A On request selects Inverter only with PowerAssist. */
 	zeroLimitSelectsInverter = true;
+	/** Model 1909209: a 0 A On request keeps panel state 3 but reports the device minimum limit. */
+	zeroLimitReportsMinimum = false;
 	/** Use the extended 0x0F F5 layout observed on firmware 1909209. */
 	extendedMasterMultiLedFrame = false;
 	/** Update the main state together with the panel switch, as the live device does. */
@@ -294,7 +296,9 @@ export class FakeMk2Connection {
 				const requestedLimit = request[4] | (request[5] << 8);
 				const applyLimit = (): void => {
 					if (!this.ignoreAssistWrites && requestedLimit < 0x8000) {
-						this.limit = requestedLimit / 10;
+						this.limit = requestedLimit === 0 && this.zeroLimitReportsMinimum
+							? 3.1
+							: requestedLimit / 10;
 					}
 				};
 				if (this.limitUpdateDelayMs > 0) setTimeout(applyLimit, this.limitUpdateDelayMs);
