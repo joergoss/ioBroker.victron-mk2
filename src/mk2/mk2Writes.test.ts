@@ -133,6 +133,8 @@ describe("long Winmon firmware writes (1909209)", () => {
 		await p.writeSetting(0, 0x89f0);
 		expect(fake.shortWinmonCompatibility).to.equal(true);
 		expect(fake.flags0).to.equal(0x89f0);
+		expect(fake.limit).to.equal(16);
+		expect(fake.switchState).to.equal(3);
 		const modeIndex = fake.requests.findIndex((r) => r[2] == 0x53 && r[9] == 0x01);
 		const writeIndex = fake.requests.findIndex((r) => r[2] == 0x57 && r[3] == 0x33);
 		expect(modeIndex).to.be.greaterThanOrEqual(0);
@@ -142,6 +144,108 @@ describe("long Winmon firmware writes (1909209)", () => {
 		expect(modeRequest[4]).to.equal(0xff);
 		expect(modeRequest[5]).to.equal(0xff);
 		expect(modeRequest[10]).to.equal(0x00);
+	});
+
+	it("keeps Inverter only when a setting write follows grid_mode=2 (issue #100)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.deviceSwVersion = 1909209;
+		fake.longSoftwareVersionResponse = true;
+		fake.longSettingInfoResponse = true;
+		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.loadDeviceInfo();
+		await p.set_grid_mode(2);
+		expect(p.mk2Model["switch.state"].value).to.equal(2);
+		expect(fake.limit).to.equal(0);
+		fake.requests.length = 0;
+		await p.writeSetting(0, 0x89f0);
+		const modeRequest = fake.requests.find((r) => r[2] == 0x53 && r[9] == 0x01);
+		// The preparatory S frame must not send the ignored limit 0xFFFF or a
+		// nonzero minimum: that cancels Inverter only and returns the unit to On.
+		expect(modeRequest).to.not.equal(undefined);
+		expect(modeRequest![3]).to.equal(2);
+		expect(modeRequest![4]).to.equal(0);
+		expect(modeRequest![5]).to.equal(0);
+		expect(fake.flags0).to.equal(0x89f0);
+		expect(fake.switchState).to.equal(2);
+	});
+
+	it("keeps the accepted panel-state-3 zero grid when a setting write follows (issue #100)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.deviceSwVersion = 1909209;
+		fake.longSoftwareVersionResponse = true;
+		fake.longSettingInfoResponse = true;
+		// Live 1909209: after 0 A the panel stays On (3) while the main state is
+		// Invert and F5 reports the device minimum instead of 0 A.
+		fake.zeroLimitSelectsInverter = false;
+		fake.zeroLimitReportsMinimum = true;
+		fake.linkMainStateToSwitch = false;
+		fake.currentState = 4;
+		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.loadDeviceInfo();
+		await p.master_multi_led_info();
+		await p.set_grid_mode(1);
+		expect(p.mk2Model["switch.state"].value).to.equal(3);
+		expect(p.mk2Model["state.state"].value).to.equal(40);
+		expect(fake.limit).to.be.closeTo(3.1, 0.01);
+		fake.requests.length = 0;
+		await p.writeSetting(0, 0x89f0);
+		const modeRequest = fake.requests.find((r) => r[2] == 0x53 && r[9] == 0x01);
+		expect(modeRequest).to.not.equal(undefined);
+		expect(modeRequest![3]).to.equal(3);
+		expect(modeRequest![4]).to.equal(0);
+		expect(modeRequest![5]).to.equal(0);
+		expect(fake.flags0).to.equal(0x89f0);
+		expect(fake.switchState).to.equal(3);
+	});
+
+	it("refuses a setting write when the limit is the device minimum and no setpoint is known (issue #100)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.deviceSwVersion = 1909209;
+		fake.longSoftwareVersionResponse = true;
+		fake.longSettingInfoResponse = true;
+		fake.limit = 3.1;
+		const p = protocolWith(fake);
+		await p.loadDeviceInfo();
+		await p.master_multi_led_info();
+		fake.requests.length = 0;
+		await expect(p.writeSetting(0, 0x89f0)).to.be.rejectedWith(Mk2ValidationError);
+		expect(fake.requests.filter((r) => r[2] == 0x53).length).to.equal(0);
+		expect(fake.writes.length).to.equal(0);
+		expect(fake.shortWinmonCompatibility).to.equal(false);
+	});
+
+	it("refuses the 0 A preparatory frame when PowerAssist is not known enabled (issue #100)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.deviceSwVersion = 1909209;
+		fake.longSoftwareVersionResponse = true;
+		fake.longSettingInfoResponse = true;
+		const p = protocolWith(fake);
+		p.currentSwitchState = 2;
+		p.mk2Model["setting.flag.AssistEnabled"].value = false;
+		await p.loadDeviceInfo();
+		fake.requests.length = 0;
+		await expect(p.writeSetting(0, 0x89f0)).to.be.rejectedWith("PowerAssist");
+		expect(fake.requests.filter((r) => r[2] == 0x53).length).to.equal(0);
+		expect(fake.writes.length).to.equal(0);
+	});
+
+	it("refuses the 0 A preparatory frame in DMC-dedicated mode (issue #100)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.deviceSwVersion = 1909209;
+		fake.longSoftwareVersionResponse = true;
+		fake.longSettingInfoResponse = true;
+		fake.dmcDedicated = true;
+		const p = protocolWith(fake);
+		await p.loadDeviceInfo();
+		await p.master_multi_led_info();
+		p.currentSwitchState = 2;
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		fake.requests.length = 0;
+		await expect(p.writeSetting(0, 0x89f0)).to.be.rejectedWith("DMC-dedicated");
+		expect(fake.requests.filter((r) => r[2] == 0x53).length).to.equal(0);
+		expect(fake.writes.length).to.equal(0);
 	});
 });
 

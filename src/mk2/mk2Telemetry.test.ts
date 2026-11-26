@@ -96,6 +96,48 @@ describe("Mk2Protocol state and sub-state (issue #9)", () => {
 		expect(p.mk2Model["state.substate"].value).to.equal(3);
 	});
 
+	it("verifies forced absorption with its documented sub-state (issue #103)", async () => {
+		const fake = new FakeMk2Connection();
+		const p = protocolWith(fake);
+		await p.force_state(2);
+		expect(p.mk2Model["state.state"].value).to.equal(96);
+		expect(p.mk2Model["state.substate"].value).to.equal(6);
+	});
+
+	it("waits for a delayed force_state result without repeating the write (issue #103)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.forceStateDelayMs = 150;
+		const p = protocolWith(fake);
+		await p.force_state(1);
+		expect(p.mk2Model["state.state"].value).to.equal(97);
+		expect(fake.requests.filter((r) => r[2] === 0x57 && r[3] === 0x0e && r[4] === 1).length).to.equal(1);
+	});
+
+	it("rejects force_state on known firmware older than revision 400 (issue #103)", async () => {
+		const fake = new FakeMk2Connection();
+		const p = protocolWith(fake);
+		p.mk2Model["info.device_sw_version"].value = 1909209;
+		await expect(p.force_state(3)).to.be.rejectedWith("requires firmware revision xxyy400");
+		expect(fake.requests.length).to.equal(0);
+	});
+
+	it("treats an unsupported force_state response as permanent (issue #103)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.forceStateSupported = false;
+		const p = protocolWith(fake);
+		await expect(p.force_state(3)).to.be.rejectedWith("unsupported");
+		expect(fake.requests.filter((r) => r[2] === 0x57 && r[3] === 0x0e && r[4] === 3).length).to.equal(1);
+	});
+
+	it("times out an unconfirmed force_state without repeating it (issue #103)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.forceStateDelayMs = 100;
+		const p = protocolWith(fake);
+		p.forceStateReadbackTimeoutMs = 20;
+		await expect(p.force_state(3)).to.be.rejectedWith("after 20 ms");
+		expect(fake.requests.filter((r) => r[2] === 0x57 && r[3] === 0x0e && r[4] === 3).length).to.equal(1);
+	});
+
 	it("rejects invalid force_state values instead of sending nothing", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);

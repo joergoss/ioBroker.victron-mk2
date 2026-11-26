@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { Mk2Protocol } from "./mk2Protocol";
 import { asConnection, FakeMk2Connection } from "../test-utils/fake-mk2";
+import { Mk2ReadbackError } from "../lib/errors";
 
 const log = {
 	level: "info",
@@ -82,6 +83,7 @@ describe("Mk2Protocol control writes", () => {
 	it("set_assist preserves an explicitly selected switch state", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
 		await p.set_switch_state(2);
 		await p.set_assist(10);
 		expect(fake.switchState).to.equal(2);
@@ -110,6 +112,221 @@ describe("Mk2Protocol control writes", () => {
 		await expect(p.set_switch_state(5)).to.be.rejectedWith("invalid");
 	});
 
+	it("writes 0 A when selecting Inverter only directly (issue #100)", async () => {
+		const fake = new FakeMk2Connection();
+		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.set_switch_state(2);
+		const request = fake.requests.filter((r) => r[2] === 0x53).at(-1)!;
+		expect(request[3]).to.equal(2);
+		expect(request[4] | (request[5] << 8)).to.equal(0);
+	});
+
+	it("rejects direct Inverter only when 0 A was not applied (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.ignoreAssistWrites = true;
+		const p = protocolWith(fake);
+		p.gridModeReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await expect(p.set_switch_state(2)).to.be.rejectedWith("0 A was not applied");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("rejects direct On when its positive limit was not applied (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.ignoreAssistWrites = true;
+		const p = protocolWith(fake);
+		p.switchReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
+		p.mk2Model["setting.IMainsLimitAC1"].value = 5;
+		await expect(p.set_switch_state(3)).to.be.rejectedWith("readback mismatch");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("does not retry an applied S command whose ACK was lost (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.failAfterApplied = "ff53";
+		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await expect(p.set_switch_state(2)).to.be.rejectedWith(Mk2ReadbackError, "S command unconfirmed");
+		expect(fake.switchState).to.equal(2); // request side effect happened before the lost ACK
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("writes Charger only with the configured positive limit", async () => {
+		const fake = new FakeMk2Connection();
+		const p = protocolWith(fake);
+		p.mk2Model["setting.IMainsLimitAC1"].value = 5;
+		await p.set_switch_state(1);
+		const request = fake.requests.filter((r) => r[2] === 0x53).at(-1)!;
+		expect(request[3]).to.equal(1);
+		expect(request[4] | (request[5] << 8)).to.equal(50);
+		expect(p.mk2Model["switch.state"].value).to.equal(1);
+	});
+
+	it("confirms Off without changing the input limit", async () => {
+		const fake = new FakeMk2Connection();
+		fake.limit = 5;
+		const p = protocolWith(fake);
+		await p.set_switch_state(4);
+		const request = fake.requests.filter((r) => r[2] === 0x53).at(-1)!;
+		expect(request[3]).to.equal(4);
+		expect(request[4] | (request[5] << 8)).to.equal(0xffff);
+		expect(p.mk2Model["state.state"].value).to.equal(20);
+		expect(p.mk2Model["switch.state"].value).to.equal(4);
+		expect(fake.limit).to.equal(5);
+	});
+
+	it("does not retry Off when low-power readback becomes unavailable (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.failNext = "ff570e"; // S Off succeeds, W0E is unavailable in low power
+		const p = protocolWith(fake);
+		await expect(p.set_switch_state(4)).to.be.rejectedWith(Mk2ReadbackError, "readback failed after write acknowledgement");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("requires known enabled PowerAssist before direct Inverter only (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		const p = protocolWith(fake);
+		await expect(p.set_switch_state(2)).to.be.rejectedWith("known enabled PowerAssist");
+		p.mk2Model["setting.flag.AssistEnabled"].value = false;
+		await expect(p.set_switch_state(2)).to.be.rejectedWith("PowerAssist disabled");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(0);
+	});
+
+	it("requires the Invert main state for zero grid (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.linkMainStateToSwitch = false; // panel changes, W0E incorrectly stays Bypass
+		const p = protocolWith(fake);
+		p.gridModeReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await expect(p.set_grid_mode(1)).to.be.rejectedWith("main state is 8 instead of 4/5/6");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("requires a grid main state after grid_mode=0 (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.currentState = 4;
+		fake.switchState = 2;
+		fake.switchRegister = 0b00100000;
+		fake.linkMainStateToSwitch = false; // switch On arrives, W0E remains Invert
+		const p = protocolWith(fake);
+		p.gridModeReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
+		await p.get_state();
+		await p.master_multi_led_info();
+		await expect(p.set_grid_mode(0)).to.be.rejectedWith("main state is 4 instead of 7/8/9");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("does not expose a post-S transport failure as retryable (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.failNext = "ff570e"; // S succeeds, the following W0E readback fails
+		const p = protocolWith(fake);
+		await expect(p.set_switch_state(3)).to.be.rejectedWith(Mk2ReadbackError, "readback failed after write acknowledgement");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("waits for a delayed switch-state transition without repeating S (issue #98)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.switchState = 2;
+		fake.switchRegister = 0b00100000;
+		fake.switchUpdateDelayMs = 150;
+		const p = protocolWith(fake);
+		await p.master_multi_led_info();
+
+		await p.set_switch_state(3);
+		expect(p.mk2Model["switch.state"].value).to.equal(3);
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+		expect(fake.requests.filter((r) => r[2] === 0x46 && r[3] === 0x05).length).to.be.greaterThan(2);
+	});
+
+	it("waits for the target switch state after grid_mode (issue #98)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.switchState = 2;
+		fake.switchRegister = 0b00100000;
+		fake.switchUpdateDelayMs = 150;
+		const p = protocolWith(fake);
+		await p.master_multi_led_info();
+
+		await p.set_grid_mode(0);
+		expect(p.mk2Model["switch.state"].value).to.equal(3);
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("refreshes the main state while validating an extended F5 transition (issue #98)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.extendedMasterMultiLedFrame = true;
+		fake.linkMainStateToSwitch = true;
+		fake.switchUpdateDelayMs = 150;
+		const p = protocolWith(fake);
+		p.switchReadbackTimeoutMs = 300;
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.pollStateOnly();
+		await p.master_multi_led_info();
+
+		await p.set_grid_mode(2);
+		expect(p.mk2Model["state.state"].value).to.equal(40);
+		expect(p.mk2Model["switch.state"].value).to.equal(2);
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("accepts Inverter only as the zero-grid result with PowerAssist (§5 note 3)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.zeroLimitSelectsInverter = true;
+		const p = protocolWith(fake);
+		p.switchReadbackTimeoutMs = 20;
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+
+		await p.set_grid_mode(1);
+		expect(p.mk2Model["switch.state"].value).to.equal(2);
+		expect(fake.limit).to.equal(0);
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("waits for a delayed 0 A limit instead of rejecting the first F5 (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.limitUpdateDelayMs = 150;
+		const p = protocolWith(fake);
+		p.gridModeReadbackTimeoutMs = 500;
+		p.switchReadbackPollIntervalMs = 5;
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.set_assist(0);
+		expect(fake.limit).to.equal(0);
+		expect(p.mk2Model["state.state"].value).to.equal(40);
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
+	it("selects Invert for 0 A from Charger only when PowerAssist is enabled (§5 note 3)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.switchState = 1;
+		fake.switchRegister = 0b00010000;
+		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.master_multi_led_info();
+		expect(p.currentSwitchState).to.equal(1);
+		await p.set_assist(0);
+		expect(fake.switchState).to.equal(2);
+		expect(p.mk2Model["state.state"].value).to.equal(40);
+		expect(p.mk2Model["switch.state"].value).to.equal(2);
+	});
+
+	it("reports the last state after a bounded readback timeout (issue #98)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.switchState = 2;
+		fake.switchRegister = 0b00100000;
+		fake.switchUpdateDelayMs = 100;
+		const p = protocolWith(fake);
+		p.switchReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
+		await p.master_multi_led_info();
+
+		await expect(p.set_switch_state(3)).to.be.rejectedWith("device reports 2 instead of 3 after 20 ms");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(1);
+	});
+
 	it("set_grid_mode grid uses max limit and On", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);
@@ -118,12 +335,13 @@ describe("Mk2Protocol control writes", () => {
 		expect(fake.limit).to.equal(16);
 	});
 
-	it("set_grid_mode zero_grid writes 0 A and keeps On", async () => {
+	it("set_grid_mode zero_grid writes 0 A and confirms Invert", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
 		await p.set_grid_mode(1);
-		expect(fake.switchState).to.equal(3);
+		expect(fake.switchState).to.equal(2);
+		expect(p.mk2Model["state.state"].value).to.equal(40);
 		expect(fake.limit).to.equal(0);
 	});
 
@@ -178,6 +396,17 @@ describe("Mk2Protocol control writes", () => {
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
 		await p.set_assist(0); // 0 A is the inverter mode, not clamped
 		expect(fake.limit).to.equal(0);
+	});
+
+	it("never rounds a positive limit into the special 0 A mode (issue #101)", async () => {
+		const fake = new FakeMk2Connection();
+		const p = protocolWith(fake);
+		await p.master_multi_led_info();
+		p.mk2Model["assist.minlimit"].value = 0;
+		await p.set_assist(0.04);
+		expect(fake.limit).to.equal(0.1);
+		const request = fake.requests.filter((r) => r[2] === 0x53).at(-1)!;
+		expect(request[4] | (request[5] << 8)).to.equal(1);
 	});
 
 	it("set_assist(0) is rejected too when PowerAssist is disabled (issue #69)", async () => {

@@ -60,13 +60,17 @@ describe("switch state derivation (issue #7)", () => {
 		expect(fake.switchState).to.equal(3); // nothing was written
 	});
 
-	it("does not derive a switch state when the frame has no register (issue #38)", async () => {
+	it("rejects a write when the frame has no switch register (issues #38, #101)", async () => {
 		const fake = new FakeMk2Connection();
 		fake.masterMultiLedHasRegister = false;
 		const p = protocolWith(fake);
-		await p.set_switch_state(2);
+		p.switchReadbackTimeoutMs = 20;
+		p.gridModeReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await expect(p.set_switch_state(2)).to.be.rejectedWith("no unambiguous switch-state readback");
 		await p.master_multi_led_info();
-		expect(p.currentSwitchState).to.equal(2); // unchanged, not from the checksum
+		expect(p.currentSwitchState).to.equal(3); // no optimistic requested value
 		expect(p.mk2Model["switch.state"].value).to.equal(null);
 		expect(p.mk2Model["switch.SwitchInvert"].value).to.equal(null);
 	});
@@ -79,10 +83,24 @@ describe("switch state derivation (issue #7)", () => {
 		expect(p.mk2Model["switch.state"].value).to.equal(1);
 	});
 
+	it("ignores DMC-dedicated limit bytes and blocks assist writes (issue #102)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.dmcDedicated = true;
+		const p = protocolWith(fake);
+		await p.master_multi_led_info();
+		expect(p.mk2Model["assist.minlimit"].value).to.equal(null);
+		expect(p.mk2Model["assist.maxlimit"].value).to.equal(null);
+		expect(p.mk2Model["assist.limit"].value).to.equal(null);
+		expect(p.mk2Model["switch.state"].value).to.equal(3);
+		await expect(p.set_assist(5)).to.be.rejectedWith("DMC-dedicated");
+		expect(fake.requests.filter((r) => r[2] === 0x53).length).to.equal(0);
+	});
+
 	it("keeps the cached switch state when the write fails (issue #47)", async () => {
 		const fake = new FakeMk2Connection();
 		fake.failNext = "ff53"; // the S command fails at the transport level
 		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
 		await expect(p.set_switch_state(2)).to.be.rejected;
 		expect(p.currentSwitchState).to.equal(3);
 		expect(p.mk2Model["switch.state"].value).to.equal(3);

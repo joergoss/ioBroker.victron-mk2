@@ -103,15 +103,23 @@ accepted it and a readback matched.
 | State | Values | Description |
 | --- | --- | --- |
 | `control.set_assist` | `0 … assist.maxlimit` A | AC input current limit. `0 A` is a valid zero-grid mode when PowerAssist is enabled. The value is clamped to the device maximum. |
-| `control.switch_state` | `1` charger only, `2` inverter only, `3` on, `4` off | VE.Bus switch state. Changing it does not change the current limit. |
+| `control.switch_state` | `1` charger only, `2` inverter only, `3` on, `4` off | VE.Bus switch state. State 2 deliberately writes the required `0 A` setpoint for Invert mode and needs PowerAssist enabled; states 1/3 restore the configured or current positive limit. |
 | `control.grid_mode` | `0` grid, `1` zero grid / invert, `2` inverter only | Convenience mode that combines switch state and current limit. |
-| `control.force_state` | `1` equalise, `2` absorption, `3` float | Forces a charge phase. Equalise is a battery maintenance action; use it deliberately. |
+| `control.force_state` | `1` equalise, `2` absorption, `3` float | Forces and verifies a charge phase on firmware revision 400+. Equalise is a battery maintenance action; use it deliberately. |
 | `control.DisableCharge`, `control.WeakACInput`, `control.IBatBulk` | see object | Charger, weak-AC and bulk-current settings with validated writes. |
 | `control.DisableAES`, `control.AssistEnabled`, `control.DynamicCurrentLimiter` | `0`/`1` | Feature switches validated against the device support mask. |
 | `control.UBatAbsorption`, `control.UBatFloat`, `control.IMainsLimitAC1` | device range | Charge voltages and AC1 input current limit. Values are rejected outside the range reported by the device. |
 
 ### Safety notes
 
+- **Effective-state readback:** zero-grid/Invert commands are acknowledged only
+  after main state 4/5/6; grid mode requires 7/8/9 and the matching panel state.
+  Missing or ambiguous F5 readback is an error, never an optimistic success.
+  Grid transitions may take longer than the panel-register update.
+- **No repeated writes after lost confirmation:** once a request may have been
+  sent, a lost acknowledgement or later transport/readback failure is treated
+  as an unconfirmed write and is not automatically retried. Inspect the device
+  state before issuing a new command.
 - **Battery voltages:** absorption and float voltages must match the battery
   datasheet. Wrong values can damage the battery. The adapter reads every write
   back and does not write unchanged values (EEPROM wear).
@@ -131,7 +139,8 @@ accepted it and a readback matched.
   control write is dropped.
   `control.grid_mode = 0` while Off is rejected unless a configured or current
   AC input limit is known; it never falls back to 16 A or the device maximum.
-  Grid modes 1 and 2 read Flags0 directly for their PowerAssist validation.
+  Grid modes 1 and 2 and direct `control.switch_state = 2` read Flags0
+  directly for their PowerAssist validation.
 
 ## Troubleshooting
 
@@ -146,7 +155,9 @@ accepted it and a readback matched.
 ## Documentation and verification
 
 Development notes, protocol coverage and hardware test reports are in
-[`docs/`](docs/).
+[`docs/`](docs/). The latest step-by-step MK2 3.14 acceptance, including the
+154-check read-only matrix and reversible live-write results, is documented in
+[`docs/protocol-acceptance-2026-11-26.md`](docs/protocol-acceptance-2026-11-26.md).
 
 ## Changelog
 

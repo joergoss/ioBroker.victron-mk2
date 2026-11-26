@@ -535,7 +535,7 @@ export class Mk2Model {
 	};
 
 	"control.switch_state":    Mk2DataEntry = {
-		descr: "Command: VE.Bus switch state (1=Charger only, 2=Inverter only, 3=On, 4=Off). The device readback is switch.state. Setting 1-3 switches the device on when it is Off.",
+		descr: "Command: VE.Bus switch state (1=Charger only, 2=Inverter only via 0 A, 3=On, 4=Off). State 2 keeps the 0 A setpoint; states 1/3 restore the configured/current limit. Readback: switch.state.",
 		unit:  "",
 		role:  "state",
 		type: "number",
