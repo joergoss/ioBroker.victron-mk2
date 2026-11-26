@@ -159,7 +159,15 @@ describe("end-to-end through the real Mk2Connection receiver", () => {
 
 	it("does not force an extended On switch register to Off from the main state (issue #86)", async () => {
 		// Captured live on 1909209: main state Off, extended F5 register 0x77 = On.
-		const f5 = Buffer.from("0f4110000400041f00a0003200008077b0", "hex");
+		const live = Buffer.from("0f4110000400041f00a0003200008077b0", "hex");
+		// A standby poll of the same layout: both candidate positions read 0x00.
+		const standby = veBusFrame(0x41, [
+			0x10, 0x00, 0x04, 0x00, 0x04,
+			0x1f, 0x00, 0xa0, 0x00,
+			0x32, 0x00,
+			0x00, 0x80, 0x00,
+		], 0x0f);
+		let f5 = standby;
 		const fake = new FakeMk2Serial((request) => {
 			if (request[2] == 0x57 && request[3] == 0x0e) return mk2Frame(0x57, [0x94, 2, 0]);
 			if (request[2] == 0x46 && request[3] == 0x05) return f5;
@@ -169,6 +177,10 @@ describe("end-to-end through the real Mk2Connection receiver", () => {
 		const p = new Mk2Protocol("fake", log as any, new Mk2Connection("fake", log as any, fake as any));
 
 		await p.get_state();
+		await p.master_multi_led_info();
+		expect(p.mk2Model["switch.state"].value).to.equal(4);
+
+		f5 = live;
 		await p.master_multi_led_info();
 		expect(p.mk2Model["state.state"].value).to.equal(20);
 		expect(p.mk2Model["switch.state"].value).to.equal(3);
