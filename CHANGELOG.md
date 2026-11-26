@@ -3,6 +3,15 @@
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## __WORK IN PROGRESS__
+
+### Fixed
+
+- **LED append layout**: documented in-frame LED on/blink bytes are separated
+  from the checksummed base frame without timing heuristics. Extended F5/W35
+  decoders cannot misread them; unsupported external L-block layouts are
+  rejected explicitly instead of corrupting the base frame (issue #88).
+
 ## 0.4.6 (2026-11-26)
 
 ### Fixed

@@ -1,8 +1,9 @@
 import { expect } from "chai";
 import { Mk2Connection } from "./mk2Connection";
 import { Mk2Protocol } from "./mk2Protocol";
+import { SettingInfoCollector } from "./mk2Settings";
 import { Mk2TransportError } from "../lib/errors";
-import { FakeMk2Serial, mk2Frame, versionFrame } from "../test-utils/fake-mk2";
+import { FakeMk2Serial, mk2Frame, veBusFrame, versionFrame } from "../test-utils/fake-mk2";
 
 const log = {
 	level: "info",
@@ -14,6 +15,24 @@ const log = {
 
 function connWith(fake: FakeMk2Serial): Mk2Connection {
 	return new Mk2Connection("fake", log as any, fake as any);
+}
+
+/** Fake port that keeps a trailing block in flight until the base frame was read. */
+class DelayedBlockSerial extends FakeMk2Serial {
+	blockReleased = false;
+	private handedOut = 0;
+	constructor(private baseLength: number, private block: Buffer) {
+		super();
+	}
+	read(size: number): Buffer | null {
+		const out = super.read(size);
+		if (out) this.handedOut += out.length;
+		if (!this.blockReleased && this.handedOut >= this.baseLength) {
+			this.blockReleased = true;
+			this.push(this.block);
+		}
+		return out;
+	}
 }
 
 describe("Mk2Connection", () => {
@@ -361,9 +380,9 @@ describe("diagnostic counters (issues #65, #66)", () => {
 });
 
 describe("appended LED status (issue #67)", () => {
-	it("does not decode the appended LED block as the next response", async () => {
+	it("rejects the legacy external LED block instead of corrupting the base frame (issues #67, #88)", async () => {
 		const main = mk2Frame(0x41, [0x01, 0x00]);
-		main[0] |= 0x80; // LED status appended (length bit 7)
+		main[0] |= 0x80;
 		main[main.length - 1] = 0;
 		let sum = 0;
 		for (const b of main) sum += b;
@@ -372,10 +391,80 @@ describe("appended LED status (issue #67)", () => {
 		const fake = new FakeMk2Serial();
 		fake.push(Buffer.concat([main, Buffer.from([0x4c, 0x01, 0x00]), mk2Frame(0x41, [0x01, 0x00])]));
 		const conn = connWith(fake);
-		const first = await conn.receiveFrame(200);
-		expect(first[2]).to.equal(0x41);
-		const second = await conn.receiveFrame(200);
-		expect(second[2]).to.equal(0x41); // the LED block must not be a response
+		await expect(conn.receiveFrame(200)).to.be.rejectedWith("Unsupported LED-appended frame layout");
+	});
+
+	it("normalizes the documented in-frame LED append without waiting (issue #88)", async () => {
+		// Appendix 1: 84 FF 'S' <LED-on> <LED-blink> <Checksum>.
+		// The base frame is 02 FF 'S' AC: sum(02 FF 53) = 0x154 -> 0xAC.
+		const frame = Buffer.from([0x84, 0xff, 0x53, 0x01, 0x00, 0x00]);
+		let sum = 0;
+		for (const b of frame.subarray(0, -1)) sum += b;
+		frame[frame.length - 1] = (256 - (sum % 256)) & 0xff;
+		const fake = new FakeMk2Serial();
+		fake.push(frame);
+		const conn = connWith(fake);
+		const start = Date.now();
+		const result = await conn.receiveFrame(200);
+		expect(Date.now() - start).to.be.lessThan(80);
+		expect(result.equals(Buffer.from([0x02, 0xff, 0x53, 0xac]))).to.equal(true);
+	});
+
+	it("rejects an in-flight legacy external L block instead of guessing (issue #88)", async () => {
+		const base = veBusFrame(0x41, [
+			0x10, 0x10, 0x00, 0x00, 0x04,
+			0x1f, 0x00, 0xa0, 0x00,
+			0x1f, 0x00,
+			0x00, 0x00, 0x67,
+		], 0x0f);
+		base[0] |= 0x80;
+		base[base.length - 1] = 0;
+		let sum = 0;
+		for (const b of base) sum += b;
+		base[base.length - 1] = (256 - (sum % 256)) & 0xff;
+
+		const fake = new DelayedBlockSerial(base.length, Buffer.from([0x4c, 0x10, 0x00, 0x00]));
+		fake.push(base);
+		const conn = connWith(fake);
+		await expect(conn.receiveFrame(500)).to.be.rejectedWith("Unsupported LED-appended frame layout");
+		expect(fake.blockReleased).to.equal(true);
+		expect(conn.protocolErrors).to.equal(1);
+		expect(conn.synced).to.equal(false);
+		expect(conn.lastError).to.contain("Unsupported LED-appended frame layout");
+		expect(fake.isOpen()).to.equal(false);
+	});
+
+	it("normalizes a long W35 setting-info response with in-frame LED bytes (issue #88)", async () => {
+		for (const access of [undefined, 1]) {
+			const data = [0x89, 0x9c, 0xff, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00, 0x78, 0x00];
+			if (access !== undefined) data.push(access);
+			const base = mk2Frame(0x57, data);
+			expect(base[0]).to.equal(access === undefined ? 0x0d : 0x0e);
+
+			const appended = Buffer.alloc(base.length + 2);
+			appended[0] = (base[0] + 2) | 0x80;
+			base.copy(appended, 1, 1, base.length - 1);
+			appended[appended.length - 3] = 0x10;
+			appended[appended.length - 2] = 0x00;
+			let sum = 0;
+			for (const b of appended.subarray(0, -1)) sum += b;
+			appended[appended.length - 1] = (256 - (sum % 256)) & 0xff;
+
+			const fake = new FakeMk2Serial();
+			fake.push(appended);
+			const conn = connWith(fake);
+			const result = await conn.receiveFrame(200);
+			expect(result.equals(base)).to.equal(true);
+
+			const collector = new SettingInfoCollector(4, true);
+			expect(await collector.addFrame(result)).to.equal(true);
+			expect(collector.info.supported).to.equal(true);
+			expect(collector.info.sc).to.equal(-100);
+			expect(collector.info.scale).to.equal(0.01);
+			expect(collector.info.def).to.equal(120);
+			expect(collector.info.min).to.equal(0);
+			expect(collector.info.max).to.equal(120);
+		}
 	});
 });
 

@@ -327,8 +327,9 @@ class Mk2Connection {
                     continue;
                 }
             }
-            // Bit 7 of the length byte means an LED status frame is appended;
-            // it must not be counted as part of the frame length.
+            // Bit 7 of the length byte marks appended LED status data (the
+            // documented in-frame bytes or a legacy external L block); it must
+            // not be counted as part of the frame length.
             const len = this.rxBuffer[0] & 0x7F;
             const ledAppended = (this.rxBuffer[0] & 0x80) !== 0;
             if (len == 0) {
@@ -349,46 +350,57 @@ class Mk2Connection {
             if (this.rxBuffer.length < needed) {
                 await this.fail("timeout", "Timeout while receiving complete MK2 frame");
             }
-            const frame = this.rxBuffer.slice(0, needed);
+            let frame = this.rxBuffer.slice(0, needed);
             if (!this.checksum(frame)) {
                 await this.fail("checksum", "MK2 frame checksum error");
             }
             this.rxBuffer = this.rxBuffer.slice(needed);
-            if (ledAppended) {
-                // The appended LED block is not a response to the next command (N12).
-                await this.discardAppendedLedStatus(deadline);
-            }
             this.frame_debug("RECV <-", frame);
             // Bit 7 is LED-append framing metadata, not part of the protocol
             // length. Mask it before handing the frame to the decoders; the
             // checksum was already verified over the raw byte.
             frame[0] &= 0x7f;
+            if (ledAppended) {
+                // Only the documented in-frame layouts are accepted. Do not guess
+                // between an external legacy L block and payload bytes (#88).
+                if (!this.isSupportedInFrameLedLayout(frame)) {
+                    await this.fail("protocol", "Unsupported LED-appended frame layout");
+                }
+                frame = this.removeInFrameLedStatus(frame);
+            }
             return frame;
         }
         await this.fail("timeout", "Timeout waiting for MK2 frame");
         throw new Error("unreachable");
     }
-    /** Drop an appended 'L' <on> <blink> block after a frame with the LED bit. */
-    async discardAppendedLedStatus(deadline) {
-        // Use a small independent grace window: the frame may have arrived late,
-        // so the caller's deadline can already be exhausted.
-        const graceEnd = Math.min(deadline, Date.now() + 100);
-        while (this.rxBuffer.length < 4 && Date.now() < graceEnd) {
-            const chunk = this.port.read(4 - this.rxBuffer.length);
-            if (chunk) {
-                this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
-            }
-            else {
-                await sleep(5);
-            }
-        }
-        if (this.rxBuffer.length >= 3 && this.rxBuffer[0] == 0x4c) {
-            // Older firmware appends a trailing 0x00 that would otherwise be
-            // read as the next frame length (0 -> protocol error).
-            const consume = this.rxBuffer.length >= 4 && this.rxBuffer[3] == 0x00 ? 4 : 3;
-            this.log.debug("discarding appended LED status frame");
-            this.rxBuffer = this.rxBuffer.slice(consume);
-        }
+    /** Validate the documented in-frame LED layout before stripping payload bytes. */
+    isSupportedInFrameLedLayout(frame) {
+        const len = frame[0] & 0x7f;
+        const marker = frame[1];
+        const command = frame[2];
+        // Appendix 1: S acknowledgement + LED-on + LED-blink + checksum.
+        if (marker === 0xff && command === 0x53 && len === 4)
+            return true;
+        // Validated extended F5 layout (base 0x0F + two in-frame LED bytes).
+        if (marker === 0x41 && len === 0x11)
+            return true;
+        // Long setting-info base 0x0D/0x0E + two in-frame LED bytes.
+        if (marker === 0xff && command === 0x57 && (len === 0x0f || len === 0x10))
+            return true;
+        return false;
+    }
+    /** Strip the documented in-frame LED on/blink bytes and rebuild the base frame. */
+    removeInFrameLedStatus(frame) {
+        const ledOn = frame[frame.length - 3];
+        const ledBlink = frame[frame.length - 2];
+        const base = Buffer.concat([frame.subarray(0, -3), frame.subarray(-1)]);
+        base[0] = (base[0] - 2) & 0x7f;
+        let sum = 0;
+        for (const byte of base.subarray(0, -1))
+            sum += byte;
+        base[base.length - 1] = (256 - (sum % 256)) & 0xff;
+        this.log.debug(`in-frame LED status: on=0x${ledOn.toString(16)}, blink=0x${ledBlink.toString(16)}`);
+        return base;
     }
     /**
      * Count the failure and invalidate the connection. A timeout or checksum

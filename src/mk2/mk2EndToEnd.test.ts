@@ -61,13 +61,13 @@ describe("end-to-end through the real Mk2Connection receiver", () => {
 		expect(p.mk2Model["switch.SwitchCharge"].value).to.equal(0);
 	});
 
-	it("masks the LED-append bit before parsing the extended F5 frame", async () => {
+	it("rejects an external L block instead of treating it as F5 payload (issues #67, #88)", async () => {
 		const f5 = veBusFrame(0x41, [
 			0x10, 0x10, 0x00, 0x00, 0x04,
 			0x1f, 0x00, 0xa0, 0x00,
 			0x1f, 0x00,
 			0x00, 0x00, 0x67,
-		], 0x8f); // length bit 7: an L block follows
+		], 0x8f);
 		const fake = new FakeMk2Serial((request) => {
 			if (request[2] == 0x57 && request[3] == 0x36) return mk2Frame(0x57, [0x8e, 0x9c, 0x7f, 0x8f, 0, 0]);
 			if (request[2] == 0x46 && request[3] == 0x05) return Buffer.concat([f5, Buffer.from([0x4c, 0x10, 0x00])]);
@@ -76,9 +76,7 @@ describe("end-to-end through the real Mk2Connection receiver", () => {
 		fake.push(versionFrame());
 		const conn = new Mk2Connection("fake", log as any, fake as any);
 		const p = new Mk2Protocol("fake", log as any, conn);
-		await p.master_multi_led_info();
-		expect(p.mk2Model["assist.limit"].value).to.equal(3.1);
-		expect(p.mk2Model["switch.state"].value).to.equal(2);
+		await expect(p.master_multi_led_info()).to.be.rejectedWith("Unsupported LED-appended frame layout");
 	});
 
 	it("keeps the previous switch state when both candidates are plausible", async () => {
@@ -223,6 +221,31 @@ describe("end-to-end through the real Mk2Connection receiver", () => {
 		await p.master_multi_led_info();
 		expect(p.mk2Model["state.state"].value).to.equal(20);
 		expect(p.mk2Model["switch.state"].value).to.equal(null);
+	});
+
+	it("does not decode in-frame LED bytes as an extended F5 switch register (issue #88)", async () => {
+		const live = Buffer.from("0f4110000400041f00a0003200008077b0", "hex");
+		const appended = Buffer.alloc(live.length + 2);
+		appended[0] = (live[0] + 2) | 0x80;
+		live.copy(appended, 1, 1, live.length - 1);
+		appended[appended.length - 3] = 0x10;
+		appended[appended.length - 2] = 0x00;
+		let sum = 0;
+		for (const b of appended.subarray(0, -1)) sum += b;
+		appended[appended.length - 1] = (256 - (sum % 256)) & 0xff;
+		const fake = new FakeMk2Serial((request) => {
+			if (request[2] == 0x57 && request[3] == 0x0e) return mk2Frame(0x57, [0x94, 2, 0]);
+			if (request[2] == 0x46 && request[3] == 0x05) return appended;
+			return mk2Frame(0x41, [0x01, 0x00]);
+		});
+		fake.push(versionFrame());
+		const p = new Mk2Protocol("fake", log as any, new Mk2Connection("fake", log as any, fake as any));
+
+		await p.get_state();
+		await p.master_multi_led_info();
+		expect(p.mk2Model["switch.state"].value).to.equal(3);
+		expect(p.mk2Model["switch.SwitchCharge"].value).to.equal(1);
+		expect(p.mk2Model["switch.SwitchInvert"].value).to.equal(1);
 	});
 });
 
