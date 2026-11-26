@@ -103,7 +103,7 @@ describe("switch state derivation (issue #7)", () => {
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
 		await expect(p.set_switch_state(2)).to.be.rejected;
 		expect(p.currentSwitchState).to.equal(3);
-		expect(p.mk2Model["switch.state"].value).to.equal(3);
+		expect(p.mk2Model["switch.state"].value).to.equal(null);
 	});
 });
 

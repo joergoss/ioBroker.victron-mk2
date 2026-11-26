@@ -26,6 +26,26 @@ describe("poll loop shutdown (issue #22)", () => {
 		expect(loop.isRunning).to.equal(false);
 	});
 
+	it("does not detach or restart a still-running iteration after a stop timeout (#122)", async () => {
+		let iterations = 0;
+		const loop = new PollLoop(async () => {
+			iterations++;
+			await sleep(40);
+		}, 1);
+		loop.start(0);
+		await sleep(5);
+		await loop.stop(1);
+		expect((loop as any).task).not.to.equal(null);
+		loop.start(0); // must not create a parallel loop beside the old task
+		await sleep(60);
+		expect(iterations).to.equal(1);
+		expect((loop as any).task).to.equal(null);
+		loop.start(0); // after natural completion no second stop is needed
+		await sleep(10);
+		expect(iterations).to.equal(2);
+		await loop.stop(20);
+	});
+
 	it("stop without start is a no-op", async () => {
 		const loop = new PollLoop(async () => undefined, 5);
 		await loop.stop(50);

@@ -25,9 +25,11 @@ export async function publishModel(
 	model: Record<string, Mk2DataEntry>,
 	setState: (key: string, value: Mk2DataEntry["value"]) => Promise<void>,
 	only?: string[],
+	shouldContinue: () => boolean = () => true,
 ): Promise<number> {
 	let published = 0;
 	for (const key of selectStatesToPublish(model, only)) {
+		if (!shouldContinue()) break;
 		const entry = model[key];
 		await setState(key, entry.value);
 		entry.valueOld = entry.value;

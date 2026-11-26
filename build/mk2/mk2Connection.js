@@ -98,6 +98,19 @@ class Mk2Connection {
             await sleep(30);
         }
     }
+    /** Open and immediately re-check shutdown so a slow open cannot resurrect the port. */
+    async openPort() {
+        await this.port.open();
+        if (this.closedDown) {
+            try {
+                await this.port.close();
+            }
+            catch (_a) {
+                // best effort; the shutdown error remains authoritative
+            }
+            throw new errors_1.Mk2TransportError("connection is shut down");
+        }
+    }
     /** Open the port and synchronise once; resynchronise after a reconnect. */
     async ensureSynced() {
         if (this.closedDown) {
@@ -107,7 +120,7 @@ class Mk2Connection {
         try {
             if (!this.port.isOpen()) {
                 this.synced = false;
-                await this.port.open();
+                await this.openPort();
             }
             if (!this.synced) {
                 await this.sync();
@@ -117,10 +130,14 @@ class Mk2Connection {
             return await this.failIo("serial open/sync", error);
         }
     }
-    /** Permanently close the connection; a later ensureSynced() rejects. */
-    async shutdown() {
+    /** Stop new I/O and make active receive loops finish before the port closes. */
+    beginShutdown() {
         this.closedDown = true;
         this.synced = false;
+    }
+    /** Permanently close the connection; a later ensureSynced() rejects. */
+    async shutdown() {
+        this.beginShutdown();
         try {
             await this.port.close();
         }
@@ -141,11 +158,13 @@ class Mk2Connection {
         try {
             this.ve9BitModeSeen = false;
             if (!this.port.isOpen()) {
-                await this.port.open();
+                await this.openPort();
             }
             await this.discardInput();
             const deadline = Date.now() + 5000;
             while (Date.now() < deadline) {
+                if (this.closedDown)
+                    throw new errors_1.Mk2TransportError("connection is shut down");
                 // read() without a size returns everything buffered. A sized read would
                 // return null until that many bytes are available, which would stall
                 // the synchronisation forever on a 9-byte version frame.
@@ -317,6 +336,8 @@ class Mk2Connection {
     async receiveFrame(timeoutMs = this.responseTimeoutMs) {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
+            if (this.closedDown)
+                throw new errors_1.Mk2TransportError("connection is shut down");
             if (this.rxBuffer.length == 0) {
                 const lengthByte = this.port.read(1);
                 if (lengthByte) {
@@ -339,6 +360,8 @@ class Mk2Connection {
             // frame has len + 2 bytes (length + len + checksum).
             const needed = len + 2;
             while (this.rxBuffer.length < needed && Date.now() < deadline) {
+                if (this.closedDown)
+                    throw new errors_1.Mk2TransportError("connection is shut down");
                 const chunk = this.port.read(needed - this.rxBuffer.length);
                 if (chunk) {
                     this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
@@ -361,9 +384,8 @@ class Mk2Connection {
             // checksum was already verified over the raw byte.
             frame[0] &= 0x7f;
             if (ledAppended) {
-                // Only the documented in-frame layouts are accepted. Do not guess
-                // between an external legacy L block and payload bytes (#88).
-                if (!this.isSupportedInFrameLedLayout(frame)) {
+                if (!this.isSupportedInFrameLedLayout(frame)
+                    || await this.hasLegacyExternalLedBlock(frame[1] === 0xff && frame[2] === 0x53 ? 0 : 30)) {
                     await this.fail("protocol", "Unsupported LED-appended frame layout");
                 }
                 frame = this.removeInFrameLedStatus(frame);
@@ -373,20 +395,43 @@ class Mk2Connection {
         await this.fail("timeout", "Timeout waiting for MK2 frame");
         throw new Error("unreachable");
     }
+    /** Pull already available trailing bytes into the accumulator and detect the
+     * distinct legacy external `L on blink` block before stripping in-frame LEDs.
+     */
+    async hasLegacyExternalLedBlock(graceMs) {
+        const deadline = Date.now() + graceMs;
+        while (true) {
+            const trailing = this.port.readAvailable();
+            if (trailing)
+                this.rxBuffer = Buffer.concat([this.rxBuffer, trailing]);
+            if (this.rxBuffer.length > 0)
+                return this.rxBuffer[0] === 0x4c;
+            if (Date.now() >= deadline)
+                return false;
+            await sleep(2);
+        }
+    }
     /** Validate the documented in-frame LED layout before stripping payload bytes. */
     isSupportedInFrameLedLayout(frame) {
         const len = frame[0] & 0x7f;
+        const baseLen = len - 2;
         const marker = frame[1];
         const command = frame[2];
-        // Appendix 1: S acknowledgement + LED-on + LED-blink + checksum.
-        if (marker === 0xff && command === 0x53 && len === 4)
-            return true;
-        // Validated extended F5 layout (base 0x0F + two in-frame LED bytes).
-        if (marker === 0x41 && len === 0x11)
-            return true;
-        // Long setting-info base 0x0D/0x0E + two in-frame LED bytes.
-        if (marker === 0xff && command === 0x57 && (len === 0x0f || len === 0x10))
-            return true;
+        if (marker === 0xff) {
+            if (command === 0x53)
+                return baseLen === 2; // S acknowledgement
+            if (command === 0x41 || command === 0x4c)
+                return baseLen === 4 || baseLen === 5;
+            if (command === 0x56)
+                return baseLen >= 7;
+            if (command === 0x57)
+                return baseLen >= 3;
+            return false;
+        }
+        if (marker === 0x20 || marker === 0x21)
+            return baseLen >= 0x0f;
+        if (marker === 0x41)
+            return baseLen >= 0x0c;
         return false;
     }
     /** Strip the documented in-frame LED on/blink bytes and rebuild the base frame. */

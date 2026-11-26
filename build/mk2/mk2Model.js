@@ -369,7 +369,7 @@ class Mk2Model {
             type: "number",
             value: 0,
             states: {
-                "0": "none / not charging",
+                "0": "charge initializing / not charging",
                 "1": "bulk",
                 "2": "absorption",
                 "3": "float",

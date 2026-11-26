@@ -25,9 +25,11 @@ function selectStatesToPublish(model, only) {
  * `valueOld` is only updated after a successful write, so a failed publication
  * is retried on the next cycle instead of being marked as done (review T8).
  */
-async function publishModel(model, setState, only) {
+async function publishModel(model, setState, only, shouldContinue = () => true) {
     let published = 0;
     for (const key of selectStatesToPublish(model, only)) {
+        if (!shouldContinue())
+            break;
         const entry = model[key];
         await setState(key, entry.value);
         entry.valueOld = entry.value;

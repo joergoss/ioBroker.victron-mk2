@@ -18,7 +18,11 @@
  * Run from the repository with build/ present, or set MK2_MODULE_PATH to a
  * development mk2Protocol.js. NODE_PATH may be needed for a temporary build.
  * MK2_PORT and MK2_ACCEPTANCE_OUT override the default port and JSON report
- * path (/tmp/mk2-write-acceptance.json).
+ * path (/tmp/mk2-write-acceptance.json). With MK2_VALIDATE_EEPROM_FREE=1 the
+ * first AC1 write also exercises prepareSettingWrite and asserts on-wire that
+ * its short FlagsExt0 S form contains no EEPROM-flags byte. The same opt-in
+ * also clears the confirmed-setpoint cache after the 0 A step and verifies a
+ * cold 0 A -> 3.1 A transition before restoring 5 A.
  */
 'use strict';
 
@@ -39,6 +43,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function main() {
     const p = new Mk2Protocol(PORT, log);
     p.conn.responseTimeoutMs = 5000;
+    const validateEepromFree = process.env.MK2_VALIDATE_EEPROM_FREE === '1';
+    const sentSFrames = [];
+    if (validateEepromFree) {
+        p.conn.debug = true;
+        p.conn.frame_debug = (direction, frame) => {
+            if (direction.startsWith('SEND') && frame[2] === 0x53) sentSFrames.push(Buffer.from(frame));
+        };
+    }
     const results = [];
     const snapshot = () => ({
         state: p.mk2Model['state.state'].value,
@@ -54,6 +66,16 @@ async function main() {
         chargeCurrent: p.mk2Model['dc_info.icharge'].value,
     });
 
+    function assertEepromFreeSFrames() {
+        for (const frame of sentSFrames.splice(0)) {
+            // Optional Reserved + FlagsExt0=1 starts at indexes 8/9. The
+            // shortened frame is 11 bytes including length and checksum.
+            if (frame.length >= 11 && frame[8] === 0 && frame[9] === 1 && frame.length !== 11) {
+                throw new Error(`S compatibility frame carries an EEPROM-flags byte: ${frame.toString('hex')}`);
+            }
+        }
+    }
+
     async function step(name, fn, expected) {
         const started = Date.now();
         try {
@@ -62,6 +84,7 @@ async function main() {
             await p.master_multi_led_info();
             await p.get_flags();
             const state = snapshot();
+            if (validateEepromFree) assertEepromFreeSFrames();
             results.push({ name, ok: true, value, state, expected, ms: Date.now() - started });
             console.log(`OK ${name} ${JSON.stringify(state)}`);
         } catch (error) {
@@ -111,6 +134,12 @@ async function main() {
 
         await step('set_assist 4 A', () => p.set_assist(4), 4);
         await step('set_assist restore 5 A', () => p.set_assist(5), 5);
+        if (validateEepromFree) {
+            // Exercise the long-mode preparation path without changing the
+            // current MK2 mode. The S frame and subsequent readbacks are real.
+            p.longWinmonFrames = true;
+            p.shortWinmonForWrites = false;
+        }
         await step('IMainsLimitAC1 4 A', () => p.set_IMainsLimitAC1(4), 4);
         await step('IMainsLimitAC1 restore 5 A', () => p.set_IMainsLimitAC1(5), 5);
 
@@ -133,6 +162,12 @@ async function main() {
         console.log('SKIP switch_state 1 charger only: incompatible with DisableCharge=true');
 
         await step('set_assist 0 A', () => p.set_assist(0), 0);
+        if (validateEepromFree) {
+            // Simulate a reconnect only in this process. The real device stays
+            // in special 0 A mode; 3.1 A must prove On + grid before success.
+            p.confirmedInputCurrentSetpoint = null;
+            await step('set_assist 3.1 A from cold 0 A', () => p.set_assist(3.1), 3.1);
+        }
         await step('set_assist restore 5 A', () => p.set_assist(5), 5);
 
         await step('DisableCharge same value 1 (no EEPROM change)', () => p.set_flagDisableCharge(1), 1);

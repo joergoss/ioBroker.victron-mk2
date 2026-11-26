@@ -25,13 +25,13 @@ describe("round 4 protocol findings", () => {
 		expect(p.calc.fmains_calc?.scale).to.equal(0x7830);
 	});
 
-	it("publishes 0 Hz instead of Infinity when the mains period is 0", async () => {
+	it("applies scale and offset before converting a zero raw mains period", async () => {
 		const fake = new FakeMk2Connection();
 		fake.acPeriod = 0;
 		const p = protocolWith(fake);
 		await p.loadScalingsIfNeeded();
 		await p.ac_info();
-		expect(p.mk2Model["ac_info.fmains"].value).to.equal(0);
+		expect(p.mk2Model["ac_info.fmains"].value).to.equal(97.56);
 	});
 
 	it("accepts the phase values 5-7 (L4/L3/L2)", async () => {

@@ -82,9 +82,14 @@ class Mk2Protocol {
         this.ramInfoCache.clear();
         this.unsupportedRam.clear();
         this.deviceInfoLoaded = false;
+        this.mk2Model["info.device_sw_version"].value = null;
+        this.mk2Model["info.device_sw_version_text"].value = null;
         this.longWinmonFrames = false;
         this.shortWinmonForWrites = false;
         this.confirmedInputCurrentSetpoint = null;
+        this.switchStateAmbiguous = true;
+        this.currentSwitchState = 3;
+        this.clearSwitchModel();
         this.extendedSettingsLoaded = false;
         this.failedExtendedSettings.clear();
         this.unsupportedScalings.clear();
@@ -103,8 +108,8 @@ class Mk2Protocol {
         this.switchReadbackPollIntervalMs = 100;
         /** False after an F5 DMC-dedicated frame whose limit bytes must be ignored. */
         this.inputCurrentLimitsValid = true;
-        /** True when the latest F5 kept a cached/unknown switch state without proof. */
-        this.switchStateAmbiguous = false;
+        /** True until an unambiguous F5 switch register has been decoded. */
+        this.switchStateAmbiguous = true;
         /** Cached CommandGetSettingInfo answers, keyed by setting id. */
         this.settingInfoCache = new Map();
         this.extendedSettingsLoaded = false;
@@ -122,6 +127,33 @@ class Mk2Protocol {
         this.conn = conn !== null && conn !== void 0 ? conn : new mk2Connection_1.Mk2Connection(portPath, log);
         this.calc = new Calc();
         this.log = log;
+        this.clearSwitchModel();
+    }
+    /** True only when the latest F5 proves the panel switch state. */
+    hasUnambiguousSwitchState() {
+        return !this.switchStateAmbiguous && typeof this.mk2Model["switch.state"].value === "number";
+    }
+    getConfirmedInputCurrentSetpoint() {
+        return this.confirmedInputCurrentSetpoint;
+    }
+    /** Reconcile a command state without confusing special 0 A with the F5 minimum. */
+    getReconciledAssistSetpoint() {
+        if (this.confirmedInputCurrentSetpoint !== null) {
+            return this.confirmedInputCurrentSetpoint;
+        }
+        const limit = this.mk2Model["assist.limit"].value;
+        if (typeof limit !== "number")
+            return undefined;
+        const encoded = this.mk2Model["state.state"].value;
+        const mainState = typeof encoded === "number" ? Math.floor(encoded / 10) : null;
+        if (mainState !== null && mainState >= 4 && mainState <= 6) {
+            if (limit === 0)
+                return 0;
+            const minimum = this.mk2Model["assist.minlimit"].value;
+            if (typeof minimum === "number" && limit <= minimum + 0.01)
+                return undefined;
+        }
+        return limit;
     }
     async poll() {
         try {
@@ -286,7 +318,7 @@ class Mk2Protocol {
             }
             return;
         }
-        this.calc[field] = { scale: info.sc, offset: info.offset };
+        this.calc[field] = { scale: info.sc, offset: info.offset, signed: info.signed };
     }
     // Thin wrappers keep the historical method names used by tests and scripts.
     async umains_calc_load() { return this.loadRamScaling(0, "umains_calc"); }
@@ -339,8 +371,8 @@ class Mk2Protocol {
             }
             if (this.calc.finv_calc) {
                 const period = (finv + this.calc.finv_calc.offset) * scale(this.calc.finv_calc.scale);
-                // A raw period of 0 means "no inverter output", not a division by zero.
-                this.mk2Model["dc_info.finv"].value = finv > 0 && period > 0 ? round(10 / period, 2) : 0;
+                // Appendix 2 applies Scale/Offset first and checks the scaled period.
+                this.mk2Model["dc_info.finv"].value = period > 0 ? round(10 / period, 2) : 0;
             }
             else {
                 this.mk2Model["dc_info.finv"].value = null;
@@ -353,7 +385,7 @@ class Mk2Protocol {
             if (frame[0] < 0x0f || frame[1] != 0x20 || frame[6] < 0x05 || frame[6] > 0x0B) {
                 throw new Error("no ac_info frame");
             }
-            const data = bp.unpack("<B B B B B H h H h B", frame, 2);
+            const data = bp.unpack("<B B B B B H H H H B", frame, 2);
             const bf_factor = data[0];
             const inv_factor = data[1];
             // const reserved   = data[2];
@@ -363,9 +395,8 @@ class Mk2Protocol {
             const imains = data[6];
             const uinv = data[7];
             const iinv = data[8];
-            // The current firmware returns the mains period as a single byte at
-            // data[13]; the protocol table describes a 2-byte field. Do not widen
-            // blindly, otherwise the checksum byte would be misread.
+            // §6.1 and the Appendix 1/2 frame layouts carry one period byte at
+            // data[13]. Future trailing bytes are handled by the generic receiver.
             const fmains = data[9];
             // State/phase need no scaling. Every analog value is independent:
             // one unsupported RAM variable must not blank the other measurements.
@@ -375,20 +406,20 @@ class Mk2Protocol {
                 ? round(((umains + this.calc.umains_calc.offset) * scale(this.calc.umains_calc.scale)), 0)
                 : null;
             // §6.1 footnote c: a zero factor means unknown current, not 0 A.
+            const signed16 = (raw, signed) => signed && raw >= 0x8000 ? raw - 0x10000 : raw;
             this.mk2Model["ac_info.imains"].value = this.calc.imains_calc && bf_factor !== 0
-                ? round(((imains + this.calc.imains_calc.offset) * scale(this.calc.imains_calc.scale) * bf_factor), 2)
+                ? round(((signed16(imains, this.calc.imains_calc.signed) + this.calc.imains_calc.offset) * scale(this.calc.imains_calc.scale) * bf_factor), 2)
                 : null;
             this.mk2Model["ac_info.uinv"].value = this.calc.uinv_calc
                 ? round(((uinv + this.calc.uinv_calc.offset) * scale(this.calc.uinv_calc.scale)), 0)
                 : null;
             this.mk2Model["ac_info.iinv"].value = this.calc.iinv_calc && inv_factor !== 0
-                ? round(((iinv + this.calc.iinv_calc.offset) * scale(this.calc.iinv_calc.scale) * inv_factor), 2)
+                ? round(((signed16(iinv, this.calc.iinv_calc.signed) + this.calc.iinv_calc.offset) * scale(this.calc.iinv_calc.scale) * inv_factor), 2)
                 : null;
             if (this.calc.fmains_calc) {
-                // A raw mains period of 0 means "no AC input". Check the raw
-                // value, not the scaled one with a potentially non-zero offset.
+                // Appendix 2 applies Scale/Offset first and checks the scaled period.
                 const mainsPeriod = (fmains + this.calc.fmains_calc.offset) * scale(this.calc.fmains_calc.scale);
-                this.mk2Model["ac_info.fmains"].value = fmains > 0 && mainsPeriod > 0 ? round(10 / mainsPeriod, 2) : 0;
+                this.mk2Model["ac_info.fmains"].value = mainsPeriod > 0 ? round(10 / mainsPeriod, 2) : 0;
             }
             else {
                 this.mk2Model["ac_info.fmains"].value = null;
@@ -450,94 +481,32 @@ class Mk2Protocol {
                 this.log.debug("master_multi_led_info: frame carries no switch register");
                 return;
             }
-            // §6.2: the switch register follows the three limits; the documented 0x0D
-            // layout puts it at index 13. Longer answers may append or insert bytes; the
-            // live 1909209 frame (0F 41 10 10 00 00 04 1F 00 A0 00 1F 00 00 00 67 47)
-            // has it at the last data byte. Main Off does not imply switch Off: the
-            // last byte wins for that layout while main is Off or not yet known (#86).
-            // Other ambiguous extended layouts while Off publish unknown instead of guessing.
-            // With a usable main state the candidates are checked against state.state;
-            // remaining ambiguity keeps the already published state, or unknown if none.
+            // §6.2 fixes the switch register at data byte 11 (frame index 13).
+            // §3.2 requires generic trailing bytes to be ignored. The only exception
+            // accepted here is the exact extended layout captured on firmware 1909209;
+            // length/main-state/cache alone must never relocate the register (#108).
             const len = response[0] & 0x7f;
             const fixedIndex = 0x0d;
-            const candidates = [];
-            if (len >= fixedIndex)
-                candidates.push(response[fixedIndex]);
-            if (len > fixedIndex)
-                candidates.push(response[len]);
+            const fixedRegister = response[fixedIndex];
+            const trailingRegister = len > fixedIndex ? response[len] : undefined;
             const stateValue = this.mk2Model["state.state"].value;
             const mainState = typeof stateValue === "number" ? Math.floor(stateValue / 10) : 0;
-            const plausible = (register) => {
-                const candidateState = (0, mk2Switch_1.switchStateFromRegister)(register);
-                if (mainState >= 4 && mainState <= 7)
-                    return candidateState === 2 || candidateState === 3;
-                if (mainState >= 8 && mainState <= 9)
-                    return candidateState === 1 || candidateState === 3;
-                return true;
-            };
-            let switch_register;
-            let switchRegisterTrusted = new Set(candidates).size === 1;
-            if (len === fixedIndex) {
-                switch_register = response[fixedIndex];
-                switchRegisterTrusted = true;
-            }
-            else if (len === 0x0f && (mainState === 0 || mainState === 1 || mainState === 2)) {
-                // The extended 0x0F layout observed on 1909209 carries the switch
-                // register as its last data byte. This remains valid before the main
-                // state is known and while main-state Off coexists with switch On.
-                switch_register = response[len];
-                switchRegisterTrusted = true;
-            }
-            else if (mainState === 0 || mainState === 1) {
-                // No usable main state yet and no validated extended layout:
-                // preserve the historical AC-block hint without narrowing below.
-                switch_register = (response[3] & 0x10) !== 0 ? response[len] : response[fixedIndex];
-            }
-            else if (mainState === 2) {
-                const uniqueCandidates = [...new Set(candidates)];
-                if (uniqueCandidates.length === 1) {
-                    switch_register = uniqueCandidates[0];
+            const version = this.mk2Model["info.device_sw_version"].value;
+            const versionUnknown = typeof version !== "number" || version <= 0;
+            const known1909209Layout = len === 0x0f && version === 1909209;
+            const unknownExtendedLayout = len === 0x0f && !known1909209Layout && versionUnknown;
+            let switch_register = known1909209Layout ? trailingRegister : fixedRegister;
+            let switchRegisterTrusted = true;
+            if (unknownExtendedLayout && trailingRegister !== undefined && trailingRegister !== fixedRegister) {
+                const fixedState = (0, mk2Switch_1.switchStateFromRegister)(fixedRegister);
+                const trailingState = (0, mk2Switch_1.switchStateFromRegister)(trailingRegister);
+                if (fixedState === trailingState) {
+                    // Bits 4/5 agree, so the state is proven even though the exact
+                    // register and its other six bits are not (#99/#102).
+                    switchRegisterTrusted = false;
                 }
                 else {
-                    // Other extended layouts are ambiguous. Never use the previous
-                    // state to discard a non-Off register or an appended byte as a
-                    // register; publish unknown instead (#86).
-                    this.log.warn("master_multi_led_info: ambiguous extended frame while Off; switch state unknown");
-                    this.switchStateAmbiguous = true;
-                    this.clearSwitchModel();
-                    return;
-                }
-            }
-            else {
-                const uniqueCandidates = [...new Set(candidates)];
-                const preferred = uniqueCandidates.filter(plausible);
-                if (preferred.length === 1) {
-                    switch_register = preferred[0];
-                }
-                else if (preferred.length > 1) {
-                    // Both positions decode to a plausible state (typical during a
-                    // mode change or with a trailing byte). Keep the state that was
-                    // already published; never flip the panel state on one frame.
-                    const preferredStateCount = new Set(preferred.map((value) => (0, mk2Switch_1.switchStateFromRegister)(value))).size;
-                    const previous = this.mk2Model["switch.state"].value;
-                    const matching = typeof previous === "number"
-                        ? preferred.find((value) => (0, mk2Switch_1.switchStateFromRegister)(value) === previous)
-                        : undefined;
-                    if (matching !== undefined) {
-                        switch_register = matching;
-                        // A cache match chooses a hypothesis; it does not prove the
-                        // panel state when the other candidate disagrees (#101).
-                        this.switchStateAmbiguous = preferredStateCount > 1;
-                    }
-                    else if (preferredStateCount === 1) {
-                        // Different register bytes can carry the same switch bits. If
-                        // every plausible candidate agrees on a new state, adopt it
-                        // instead of keeping a stale state that no candidate supports.
-                        switch_register = preferred[0];
-                    }
-                }
-                else if (new Set(uniqueCandidates.map((v) => (0, mk2Switch_1.switchStateFromRegister)(v))).size === 1) {
-                    switch_register = uniqueCandidates[0];
+                    switch_register = undefined;
                 }
             }
             const derived = switch_register === undefined ? undefined : (0, mk2Switch_1.switchStateFromRegister)(switch_register);
@@ -545,12 +514,9 @@ class Mk2Protocol {
             const contradictsChargerOnly = derived === 1 && mainState >= 4 && mainState <= 7;
             if (switch_register === undefined || contradictsOff || contradictsChargerOnly) {
                 this.switchStateAmbiguous = true;
-                // During a mode change state.state and the F5 register are sampled
-                // at different times. Keep the last known switch state instead of
-                // flickering to null; the next poll corrects it.
                 const hasPrevious = this.mk2Model["switch.state"].value !== null;
                 if (hasPrevious) {
-                    this.log.debug(`master_multi_led_info: switch register inconsistent with state ${String(stateValue)}; keeping the previous value`);
+                    this.log.debug(`master_multi_led_info: switch register ambiguous or inconsistent with state ${String(stateValue)}; keeping the previous value`);
                 }
                 else {
                     this.log.warn(`master_multi_led_info: switch register ambiguous or inconsistent with state ${String(stateValue)}; keeping it unknown`);
@@ -603,6 +569,10 @@ class Mk2Protocol {
         const data = bp.unpack("<B B", response, 4);
         const mainState = data[0];
         const subState = data[1];
+        // §7.3.2: main states 0-9; sub-state is 0 outside Charge and 0-8 in Charge.
+        if (mainState > 9 || subState > 8 || (mainState !== 9 && subState !== 0)) {
+            throw new Error(`${context}: invalid state response ${mainState}/${subState}`);
+        }
         this.mk2Model["state.state"].value = mainState * 10 + subState;
         this.mk2Model["state.substate"].value = subState;
     }
@@ -627,12 +597,12 @@ class Mk2Protocol {
             return;
         }
         if (confirmed === 0) {
-            if (limit > minimum + 0.11) {
+            if (limit > minimum + 0.01) {
                 this.confirmedInputCurrentSetpoint = null;
             }
             return;
         }
-        if (Math.abs(limit - confirmed) > 0.11) {
+        if (Math.abs(limit * 10 - confirmed * 10) > 0.01) {
             this.confirmedInputCurrentSetpoint = null;
         }
     }
@@ -657,85 +627,87 @@ class Mk2Protocol {
             throw new errors_1.Mk2ReadbackError(`${context}: S command unconfirmed; refusing automatic retry: ${message}`);
         }
     }
-    // Set the ampere level for PowerAssist.
-    async set_assist(ampere) {
+    requireUnambiguousSwitchState(context) {
+        if (!this.hasUnambiguousSwitchState()) {
+            throw new errors_1.Mk2ValidationError(`${context}: no unambiguous current F5 switch state; refusing to send S`);
+        }
+    }
+    hasAmbiguousMinimumForPositive(raw) {
+        if (raw <= 0)
+            return false;
+        const limit = this.mk2Model["assist.limit"].value;
+        if (typeof limit !== "number" || Math.abs(limit * 10 - raw) > 0.01)
+            return false;
+        if (this.confirmedInputCurrentSetpoint === 0)
+            return true;
+        const encoded = this.mk2Model["state.state"].value;
+        const mainState = typeof encoded === "number" ? Math.floor(encoded / 10) : null;
+        const minimum = this.mk2Model["assist.minlimit"].value;
+        return mainState !== null && mainState >= 4 && mainState <= 6
+            && typeof minimum === "number" && Math.abs(limit * 10 - minimum * 10) <= 0.01;
+    }
+    normalizeAssistLimit(ampere, context) {
         if (!Number.isFinite(ampere) || ampere < 0) {
-            throw new errors_1.Mk2ValidationError(`set_assist: invalid value ${ampere}`);
+            throw new errors_1.Mk2ValidationError(`${context}: invalid value ${ampere}`);
         }
         if (!this.inputCurrentLimitsValid) {
-            throw new errors_1.Mk2ValidationError("set_assist: input-current limits are unavailable in DMC-dedicated mode (§6.2)");
+            throw new errors_1.Mk2ValidationError(`${context}: input-current limits are unavailable in DMC-dedicated mode (§6.2)`);
         }
         if (ampere === 0) {
-            this.requirePowerAssistForZeroLimit("set_assist");
+            this.requirePowerAssistForZeroLimit(context);
         }
         const max = this.mk2Model["assist.maxlimit"].value;
-        if (typeof max == "number" && max > 0 && ampere > max) {
-            this.log.warn(`set_assist: clamping ${ampere} A to ${max} A`);
+        if (typeof max === "number" && max > 0 && ampere > max) {
+            this.log.warn(`${context}: clamping ${ampere} A to ${max} A`);
             ampere = max;
         }
         const min = this.mk2Model["assist.minlimit"].value;
-        if (ampere > 0 && typeof min == "number" && min > 0 && ampere < min) {
-            // The device would silently clamp up to its minimum (§5 note 2); do it
-            // explicitly instead of acknowledging a value that never took effect.
-            this.log.warn(`set_assist: clamping ${ampere} A up to the device minimum ${min} A`);
+        if (ampere > 0 && typeof min === "number" && min > 0 && ampere < min) {
+            this.log.warn(`${context}: clamping ${ampere} A up to the device minimum ${min} A`);
             ampere = min;
         }
         if (ampere > 0 && Math.round(ampere * 10) === 0) {
-            // Never round a positive request into the protocol's special 0 A mode.
-            this.log.warn(`set_assist: clamping ${ampere} A up to the protocol resolution 0.1 A`);
+            this.log.warn(`${context}: clamping ${ampere} A up to the protocol resolution 0.1 A`);
             ampere = 0.1;
         }
-        const a = Math.round(ampere * 10);
-        // Protocol §5 variant 2: Limit/10 Ampere; values >= 0x8000 mean "ignore
-        // the limit". Never let the bitwise conversion wrap around to 0 A.
-        if (a > 0x7fff) {
-            throw new errors_1.Mk2ValidationError(`set_assist: ${ampere} A exceeds the protocol range (max 3276.7 A)`);
+        const raw = Math.round(ampere * 10);
+        if (raw > 0x7fff) {
+            throw new errors_1.Mk2ValidationError(`${context}: ${ampere} A exceeds the protocol range (max 3276.7 A)`);
         }
-        const lo = a & 0xFF;
-        const hi = (a >> 8) & 0xFF;
+        return { ampere, raw };
+    }
+    // Set the ampere level for PowerAssist. explicitMode is used only by
+    // grid_mode, which deliberately chooses the outgoing panel state itself.
+    async set_assist(ampere, explicitMode = false) {
+        const normalized = this.normalizeAssistLimit(ampere, "set_assist");
+        ampere = normalized.ampere;
+        const a = normalized.raw;
+        if (!explicitMode) {
+            this.requireUnambiguousSwitchState("set_assist");
+        }
         if (this.currentSwitchState == 4) {
-            // A limit write always carries a panel state. Do not switch a device
-            // on that the operator switched off (issue #7).
             throw new errors_1.Mk2ValidationError("set_assist: device switch is Off; use control.switch_state or control.grid_mode to switch it on explicitly");
         }
-        // The S frame carries the panel state, so a limit write can change the
-        // operating mode. Say so instead of silently enabling the charger.
         if (ampere > 0 && this.currentSwitchState === 2) {
-            this.log.warn("set_assist: a nonzero limit switches the device from Inverter only to On (charger/AC input enabled)");
+            this.log.warn("set_assist: a positive limit switches the device from Inverter only to On (charger/AC input enabled)");
         }
         if (ampere === 0 && this.currentSwitchState === 1) {
             this.log.debug("set_assist: 0 A selects Invert with PowerAssist, including from Charger only (§5 note 3)");
         }
-        const data = Buffer.from([this.currentSwitchState, lo, hi, 0x01, 0x80]);
+        const minimumCollision = this.hasAmbiguousMinimumForPositive(a);
+        const data = Buffer.from([this.currentSwitchState, a & 0xFF, (a >> 8) & 0xFF, 0x01, 0x80]);
         this.log.debug("******   set_assist");
         this.confirmedInputCurrentSetpoint = null;
         await this.sendS("set_assist", data);
         if (ampere === 0) {
-            // Limit, panel and main state may settle at different times. Verify
-            // all three within the same bounded readback loop, without an early
-            // one-shot limit check or another S write.
             await this.waitForSwitchState(data[0] === 2 ? [2] : [2, 3], "set_assist", [4, 5, 6], this.gridModeReadbackTimeoutMs, 0);
         }
         else {
-            // The S frame is only an acknowledgement; verify the effective limit.
-            // A post-write transport failure is a readback failure: retrying the
-            // whole command could repeat an S frame that was already applied.
-            try {
-                await this.master_multi_led_info();
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                throw new errors_1.Mk2ReadbackError(`set_assist: F5 readback failed after S acknowledgement: ${message}`);
-            }
-            const actual = this.mk2Model["assist.limit"].value;
-            if (typeof actual !== "number" || Math.abs(actual - ampere) > 0.11) {
-                throw new errors_1.Mk2ReadbackError(`set_assist: readback mismatch (wanted ${ampere} A, device reports ${actual} A)`);
-            }
+            // Exact raw readback plus an unambiguous panel state. When the old
+            // special 0 A setpoint already displays the requested minimum, only a
+            // grid main-state transition proves that the positive write applied (#119).
+            await this.waitForSwitchState(ampere > 0 && data[0] === 2 ? 3 : data[0], "set_assist", minimumCollision ? [7, 8, 9] : undefined, minimumCollision ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs, a);
         }
-        // Keep the command state in sync when this was invoked indirectly by
-        // grid_mode; a direct control.set_assist write is acknowledged by main.
-        // Return the value the device actually holds, not the raw request: it
-        // quantizes to 0.1 A steps.
         const appliedLimit = ampere === 0 ? 0 : this.mk2Model["assist.limit"].value;
         const appliedValue = typeof appliedLimit === "number" ? appliedLimit : ampere;
         this.mk2Model["control.set_assist"].value = appliedValue;
@@ -767,13 +739,14 @@ class Mk2Protocol {
                 ? configured
                 : typeof current === "number" && current > 0 ? current : undefined;
             if (value !== undefined) {
-                limit = Math.round(value * 10);
+                limit = this.normalizeAssistLimit(value, "set_switch_state").raw;
             }
         }
         if (limit < 0x8000 && !this.inputCurrentLimitsValid) {
             throw new errors_1.Mk2ValidationError("set_switch_state: input-current limit is unavailable in DMC-dedicated mode (§6.2)");
         }
         const data = Buffer.from([state, limit & 0xFF, (limit >> 8) & 0xFF, 0x01, 0x80]);
+        const minimumCollision = limit > 0 && limit < 0x8000 && this.hasAmbiguousMinimumForPositive(limit);
         if (limit < 0x8000) {
             this.confirmedInputCurrentSetpoint = null;
         }
@@ -781,7 +754,7 @@ class Mk2Protocol {
         // The S frame is only an acknowledgement. Verify the effective state
         // through bounded W0E/F5 readback; live transitions can take several seconds.
         // State 2 also requires the documented Invert main state, not just panel bits.
-        await this.waitForSwitchState(state, "set_switch_state", state === 2 ? [4, 5, 6] : undefined, state === 2 ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs, limit < 0x8000 ? limit : undefined);
+        await this.waitForSwitchState(state, "set_switch_state", state === 2 ? [4, 5, 6] : minimumCollision ? (state === 1 ? [8, 9] : [7, 8, 9]) : undefined, state === 2 || minimumCollision ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs, limit < 0x8000 ? limit : undefined);
         if (limit < 0x8000) {
             this.confirmedInputCurrentSetpoint = limit / 10;
         }
@@ -815,7 +788,7 @@ class Mk2Protocol {
         if (mode == 2) {
             this.currentSwitchState = 2;
             try {
-                await this.set_assist(0);
+                await this.set_assist(0, true);
             }
             catch (error) {
                 // The S frame may have reached the device even though the write
@@ -843,9 +816,9 @@ class Mk2Protocol {
         const limit = mode == 0 ? knownLimit !== null && knownLimit !== void 0 ? knownLimit : (typeof max == "number" && max > 0 ? max : 16) : 0;
         this.currentSwitchState = 3;
         try {
-            await this.set_assist(limit);
+            const applied = await this.set_assist(limit, true);
             if (mode === 0) {
-                await this.waitForSwitchState(3, "set_grid_mode", [7, 8, 9], this.gridModeReadbackTimeoutMs, Math.round(limit * 10));
+                await this.waitForSwitchState(3, "set_grid_mode", [7, 8, 9], this.gridModeReadbackTimeoutMs, Math.round(applied * 10));
             }
             // Zero-grid is fully validated by set_assist(0): the effective main
             // state must be Invert and the panel may report Inverter only.
@@ -890,10 +863,10 @@ class Mk2Protocol {
                 actualLimit = typeof limitValue === "number" ? limitValue : null;
                 minimumLimit = typeof minValue === "number" ? minValue : null;
                 if (expectedLimitRaw === 0) {
-                    limitMatches = actualLimit !== null && minimumLimit !== null && actualLimit <= minimumLimit + 0.11;
+                    limitMatches = actualLimit !== null && minimumLimit !== null && actualLimit <= minimumLimit + 0.01;
                 }
                 else if (expectedLimitRaw !== undefined) {
-                    limitMatches = actualLimit !== null && Math.abs(actualLimit - expectedLimitRaw / 10) <= 0.11;
+                    limitMatches = actualLimit !== null && Math.abs(actualLimit * 10 - expectedLimitRaw) <= 0.01;
                 }
                 if (actual !== null && switchMatches && mainMatches && limitMatches) {
                     return actual;
@@ -1028,6 +1001,10 @@ class Mk2Protocol {
         const second_cmd = Buffer.from([0x34, raw & 0xFF, (raw >> 8) & 0xFF]);
         const frames = Buffer.concat([this.create_frame("W", first_cmd), this.create_frame("W", second_cmd)]);
         return this.conn.communicate(frames, async (response) => {
+            if (response[1] === 0xff && response[2] === 0x57 && response[3] === 0x80) {
+                const reason = response.length > 5 ? `0x${response[4].toString(16)}` : "unknown";
+                throw new errors_1.Mk2ValidationError(`writeSetting(${id}): device rejected the command (0x80, reason ${reason})`);
+            }
             // 0x88 is the documented write acknowledgement; 0x87 occurs on some
             // firmware for the first of the two concatenated frames.
             if (response[0] < 0x05 || response[1] != 0xff || response[2] != 0x57
@@ -1046,6 +1023,7 @@ class Mk2Protocol {
         if (!this.longWinmonFrames || this.shortWinmonForWrites) {
             return;
         }
+        this.requireUnambiguousSwitchState("prepareSettingWrite");
         const limit = this.mk2Model["assist.limit"].value;
         const minimum = this.mk2Model["assist.minlimit"].value;
         let rawLimit;
@@ -1053,16 +1031,28 @@ class Mk2Protocol {
             rawLimit = 0;
         }
         else if (this.currentSwitchState === 4) {
-            rawLimit = typeof limit === "number" && limit > 0 ? Math.round(limit * 10) : 0xFFFF;
+            rawLimit = typeof limit === "number" && limit > 0
+                ? this.normalizeAssistLimit(limit, "prepareSettingWrite").raw : 0xFFFF;
         }
         else if (this.confirmedInputCurrentSetpoint !== null) {
-            rawLimit = Math.round(this.confirmedInputCurrentSetpoint * 10);
+            rawLimit = this.confirmedInputCurrentSetpoint === 0 ? 0
+                : this.normalizeAssistLimit(this.confirmedInputCurrentSetpoint, "prepareSettingWrite").raw;
+        }
+        else if (limit === 0) {
+            // A cold start/reconnect can still prove special 0 A from F5 + W0E.
+            this.requirePowerAssistForZeroLimit("prepareSettingWrite");
+            const encoded = this.mk2Model["state.state"].value;
+            const mainState = typeof encoded === "number" ? Math.floor(encoded / 10) : null;
+            if (mainState === null || mainState < 4 || mainState > 6) {
+                throw new errors_1.Mk2ValidationError("prepareSettingWrite: 0 A is visible but the Invert main state is not confirmed");
+            }
+            rawLimit = 0;
         }
         else if (typeof limit === "number" && limit > 0) {
-            if (typeof minimum === "number" && minimum > 0 && Math.abs(limit - minimum) <= 0.11) {
+            if (typeof minimum === "number" && minimum > 0 && Math.abs(limit * 10 - minimum * 10) <= 0.01) {
                 throw new errors_1.Mk2ValidationError("prepareSettingWrite: input-current setpoint is unknown (device reports its minimum); refusing the setting write");
             }
-            rawLimit = Math.round(limit * 10);
+            rawLimit = this.normalizeAssistLimit(limit, "prepareSettingWrite").raw;
         }
         else {
             rawLimit = 0xFFFF;
@@ -1075,9 +1065,11 @@ class Mk2Protocol {
         }
         const data = Buffer.from([
             this.currentSwitchState, rawLimit & 0xFF, (rawLimit >> 8) & 0xFF, 0x01, 0x80,
-            0x00, 0x01, 0x00,
+            0x00, 0x01,
+            // No EEPROM byte: never clear Force-VE.Bus / Block-XMT as a side effect.
         ]);
         await this.sendS("prepareSettingWrite", data);
+        await this.waitForSwitchState(this.currentSwitchState, "prepareSettingWrite", rawLimit === 0 ? [4, 5, 6] : undefined, rawLimit === 0 ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs, rawLimit < 0x8000 ? rawLimit : undefined);
         this.shortWinmonForWrites = true;
     }
     /** Write Flags0 with CommandWriteSetting + CommandWriteData. */
@@ -1094,7 +1086,7 @@ class Mk2Protocol {
         if (cached && !force) {
             return cached;
         }
-        const collector = new mk2Settings_1.SettingInfoCollector(id, this.longWinmonFrames);
+        const collector = new mk2Settings_1.SettingInfoCollector(id, this.longWinmonFrames && !this.shortWinmonForWrites);
         await this.conn.communicateMulti(this.create_frame("W", Buffer.from([0x35, id & 0xFF, (id >> 8) & 0xFF])), async (frame) => collector.addFrame(frame));
         if (!collector.isComplete()) {
             // Anything incomplete leaves min/max unknown and must not authorize a
@@ -1172,54 +1164,67 @@ class Mk2Protocol {
         }
         let sc = 0;
         let offset = 0;
-        await this.conn.communicate(this.create_frame("W", Buffer.from([0x36, id & 0xFF, (id >> 8) & 0xFF])), async (response) => {
+        let seenScale = false;
+        let seenOffset = false;
+        let complete = false;
+        const longMode = this.longWinmonFrames && !this.shortWinmonForWrites;
+        await this.conn.communicateMulti(this.create_frame("W", Buffer.from([0x36, id & 0xFF, (id >> 8) & 0xFF])), async (response) => {
             if (response[1] != 0xff || response[2] != 0x57) {
                 throw new Error("getRamInfo: not a Winmon response frame");
             }
-            // Value-free 0x8E is the exact short-form "unsupported" answer
-            // observed on 1909209 (03 FF W 8E <checksum>). Do not generalize
-            // this firmware extension to truncated frames with arbitrary payload.
+            // Exact value-free unsupported response observed on 1909209.
             if (response[3] === 0x8e && response[0] < 0x05) {
                 if (response[0] === 0x03 && response.length === 5) {
-                    const unsupported = (0, mk2Ram_1.makeRamInfo)(id, 0, 0);
-                    this.ramInfoCache.set(id, unsupported);
-                    return;
+                    sc = 0;
+                    seenScale = true;
+                    complete = true;
+                    return true;
                 }
                 throw new Error("getRamInfo: incomplete scale response");
             }
-            // Unsupported variables answer with only 0x8E <Sc=0> and no 0x8F
-            // offset (§7.3.9), so the frame is shorter than the usual 0x08.
-            // Parse by W frame content instead of by a fixed length.
-            let seenScale = false;
-            let seenOffset = false;
+            // Mode 2 is flat: 0x8E ScLo ScHi OffsetLo OffsetHi. Only len=8
+            // with Offset-Low 0x8F is indistinguishable from a short pair;
+            // reject it rather than caching a guessed offset (#107/#115).
+            const longResponse = response[3] === 0x8e && response[0] >= 0x07
+                && (longMode || (response[0] === 0x07 && response.length === 9));
+            if (longResponse) {
+                if (longMode && response[0] === 0x08 && response[6] === 0x8f) {
+                    throw new Error("getRamInfo: ambiguous short-pair/long+trailer response");
+                }
+                const rawSc = response[4] | (response[5] << 8);
+                const rawOffset = response[6] | (response[7] << 8);
+                sc = rawSc >= 0x8000 ? rawSc - 0x10000 : rawSc;
+                offset = rawOffset >= 0x8000 ? rawOffset - 0x10000 : rawOffset;
+                seenScale = true;
+                seenOffset = true;
+                complete = true;
+                return true;
+            }
+            // Legacy responses consist of 0x8E/0x8F W-frame triplets and may
+            // be split over multiple MK2 frames (#107).
             for (let i = 3; i + 2 < response.length; i += 3) {
                 const cmd = response[i];
                 const value = response[i + 1] | (response[i + 2] << 8);
                 const signed = value >= 0x8000 ? value - 0x10000 : value;
-                if (cmd == 0x8e) {
+                if (cmd === 0x8e) {
                     sc = signed;
                     seenScale = true;
                 }
-                else if (cmd == 0x8f) {
+                else if (cmd === 0x8f) {
                     offset = signed;
                     seenOffset = true;
                 }
             }
-            // Long Winmon form (§7.3.9, mode 2): 0x8E <LoSc> <HiSc> <LoOff>
-            // <HiOff> without the 0x8F command byte. Parsing it as triplets would
-            // drop the offset (its low byte is usually 0x00) and then mis-scale
-            // every derived value. Detect by shape, so it also works before the
-            // firmware mode is known.
-            if (seenScale && !seenOffset && response[3] === 0x8e && response[0] >= 0x07 && response.length >= 9) {
-                const longSc = response[4] | (response[5] << 8);
-                const longOffset = response[6] | (response[7] << 8);
-                sc = longSc >= 0x8000 ? longSc - 0x10000 : longSc;
-                offset = longOffset >= 0x8000 ? longOffset - 0x10000 : longOffset;
-            }
             if (!seenScale) {
                 throw new Error("getRamInfo: response carries no scale");
             }
+            // Only Sc=0 permits omission of the Offset response (§7.3.9).
+            complete = sc === 0 || seenOffset;
+            return complete;
         });
+        if (!complete || !seenScale || (sc !== 0 && !seenOffset)) {
+            throw new Error(`getRamInfo(${id}): incomplete response, refusing to cache it`);
+        }
         const info = (0, mk2Ram_1.makeRamInfo)(id, sc, offset);
         this.ramInfoCache.set(id, info);
         return info;
@@ -1368,7 +1373,11 @@ class Mk2Protocol {
         const flags = await this.readFlags0();
         const next = value == 1 ? flags | mask : flags & ~mask;
         if (next === flags) {
-            // Nothing to change: do not spend an EEPROM write on it (review F1).
+            // Nothing to change: do not spend an EEPROM write, but still publish
+            // the fresh authoritative register read.
+            const flagKey = FLAGS0_KEYS[bit];
+            if (flagKey)
+                this.mk2Model[flagKey].value = (flags & mask) !== 0;
             this.log.debug(`${name}: already ${value}, no write needed`);
             return value;
         }
@@ -1404,6 +1413,9 @@ class Mk2Protocol {
         }
         const next = value == 1 ? flags | mask : flags & ~mask;
         if (next === flags) {
+            const def = mk2Settings_1.FLAGS1.find((d) => d.flag === flag);
+            if (def)
+                this.mk2Model[def.key].value = (flags & mask) !== 0;
             this.log.debug(`${name}: already ${value}, no write needed`);
             return value;
         }
@@ -1445,6 +1457,9 @@ class Mk2Protocol {
         }
         const current = await this.readSetting(id);
         const def = mk2Settings_1.READONLY_SETTINGS.find((d) => d.id === id);
+        if (current === null) {
+            throw new errors_1.Mk2ValidationError(`${name}: setting could not be read before writing (0x91), refusing W33/W34`);
+        }
         if (current === raw) {
             this.log.debug(`${name}: already ${value}, no EEPROM write needed`);
             // The previous write may have landed while its readback failed;
@@ -1496,7 +1511,7 @@ class Mk2Protocol {
         const info = await this.getSettingInfo(4);
         const raw = await this.readSetting(4);
         this.mk2Model["setting.IBatBulk"].value =
-            raw === null ? null : info.supported ? round((0, mk2Settings_1.settingDisplayValue)(info, raw), 2) : raw;
+            raw === null || !info.supported ? null : round((0, mk2Settings_1.settingDisplayValue)(info, raw), 2);
     }
     async set_setting_IBatBulk(value) {
         var _a, _b;
@@ -1517,9 +1532,14 @@ class Mk2Protocol {
             throw new errors_1.Mk2ValidationError(`IBatBulk must be between ${min} and ${max} (got ${value})`);
         }
         const current = await this.readSetting(4);
+        if (current === null) {
+            throw new errors_1.Mk2ValidationError("IBatBulk: setting could not be read before writing (0x91), refusing W33/W34");
+        }
         if (current === raw) {
-            this.log.debug(`IBatBulk: already ${value}, no EEPROM write needed`);
-            return value;
+            const applied = round((0, mk2Settings_1.settingDisplayValue)(info, current), 2);
+            this.mk2Model["setting.IBatBulk"].value = applied;
+            this.log.debug(`IBatBulk: already ${applied}, no EEPROM write needed`);
+            return applied;
         }
         await this.writeSetting(4, raw);
         const readback = await this.readSetting(4);

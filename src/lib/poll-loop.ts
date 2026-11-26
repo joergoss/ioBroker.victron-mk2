@@ -17,7 +17,7 @@ export class PollLoop {
 	start(delayMs = 0): void {
 		if (this.task) return;
 		this.running = true;
-		this.task = (async () => {
+		const task = (async () => {
 			if (delayMs > 0) {
 				await this.delay(delayMs);
 			}
@@ -29,6 +29,12 @@ export class PollLoop {
 				await this.delay(this.intervalMs);
 			}
 		})();
+		this.task = task;
+		void task.then(() => {
+			if (this.task === task) this.task = null;
+		}, () => {
+			if (this.task === task) this.task = null;
+		});
 	}
 
 	/** Stop scheduling and wait for the in-flight iteration (bounded). */
@@ -45,15 +51,20 @@ export class PollLoop {
 			this.wakeUp = null;
 		}
 		if (this.task) {
+			const task = this.task;
+			let settled = false;
+			void task.then(() => { settled = true; }, () => { settled = true; });
 			let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 			const timeout = new Promise<void>((resolve) => {
 				timeoutTimer = setTimeout(resolve, timeoutMs);
 			});
-			await Promise.race([this.task, timeout]);
+			await Promise.race([task, timeout]);
 			if (timeoutTimer) {
 				clearTimeout(timeoutTimer);
 			}
-			this.task = null;
+			// A timeout is not task completion. Keep the reference so start()
+			// cannot create a second loop beside the still-finishing task (#122).
+			if (settled) this.task = null;
 		}
 	}
 

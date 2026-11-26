@@ -279,7 +279,11 @@ export class FakeMk2Connection {
 			case 0x53: { // S
 				const applySwitchState = (): void => {
 					const requestedLimit = request[4] | (request[5] << 8);
-					const state = this.zeroLimitSelectsInverter && (request[3] === 1 || request[3] === 3) && requestedLimit === 0 ? 2 : request[3];
+					const state = this.zeroLimitSelectsInverter && (request[3] === 1 || request[3] === 3) && requestedLimit === 0
+						? 2
+						: request[3] === 2 && requestedLimit > 0 && requestedLimit < 0x8000
+							? 3 // 1909209 enables AC input/On for a positive limit
+							: request[3];
 					this.switchState = state;
 					// Keep the F5 register consistent with the S panel state; live
 					// hardware reflects the write in the next MasterMultiLED frame.
