@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "victron-mk2",
-    "version": "0.4.4",
+    "version": "0.4.5",
     "news": {
+      "0.4.5": {
+        "en": "Harden MK2 serial error recovery, partial-response handling and VE.Bus sync validation (#89/#91/#92)",
+        "de": "MK2-Seriell-Recovery, Partial-Response-Behandlung und VE.Bus-Sync-Validierung gehärtet (#89/#91/#92)",
+        "ru": "Улучшены восстановление последовательной связи MK2, обработка частичных ответов и проверка синхронизации VE.Bus (#89/#91/#92)",
+        "pt": "Melhorar recuperação serial MK2, respostas parciais e validação de sincronização VE.Bus (#89/#91/#92)",
+        "nl": "MK2-seriële recovery, gedeeltelijke antwoorden en VE.Bus-sync-validatie verbeterd (#89/#91/#92)",
+        "fr": "Amélioration de la récupération série MK2, des réponses partielles et de la validation de synchronisation VE.Bus (#89/#91/#92)",
+        "it": "Migliorate il ripristino seriale MK2, le risposte parziali e la validazione della sincronizzazione VE.Bus (#89/#91/#92)",
+        "es": "Mejoradas la recuperación serie MK2, las respuestas parciales y la validación de sincronización VE.Bus (#89/#91/#92)",
+        "pl": "Ulepszono odzyskiwanie łącza szeregowego MK2, odpowiedzi częściowe i walidację synchronizacji VE.Bus (#89/#91/#92)",
+        "uk": "Покращено відновлення послідовного зв’язку MK2, часткові відповіді та перевірку синхронізації VE.Bus (#89/#91/#92)",
+        "zh-cn": "增强 MK2 串口错误恢复、部分响应处理和 VE.Bus 同步验证 (#89/#91/#92)"
+      },
       "0.4.4": {
         "en": "Correct extended F5 switch decoding and setting 63 bias handling from live protocol captures (#85/#86)",
         "de": "Erweiterte F5-Switch-Dekodierung und Setting-63-Offset aus Live-Protokollframes korrigiert (#85/#86)",
