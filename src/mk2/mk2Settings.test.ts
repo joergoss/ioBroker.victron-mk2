@@ -42,6 +42,11 @@ describe("setting scaling rules (protocol §7.3.8)", () => {
 });
 
 describe("SettingInfoCollector", () => {
+	function longFrame(words: number[], access?: number, extra: number[] = []): Buffer {
+		const data = [0x89, ...words.flatMap((word) => [word & 0xff, word >> 8])];
+		if (access !== undefined) data.push(access);
+		return mk2Frame(0x57, [...data, ...extra]);
+	}
 	it("collects five W frames packed three plus two", async () => {
 		const collector = new SettingInfoCollector(4);
 		const frames = winmonFrames([
@@ -74,6 +79,28 @@ describe("SettingInfoCollector", () => {
 		expect(collector.info.min).to.equal(0);
 		const second = mk2Frame(0x57, [0x8d, 0x78, 0x00]);
 		expect(await collector.addFrame(second)).to.equal(true);
+		expect(collector.info.max).to.equal(120);
+	});
+
+	it("accepts documented long W35 responses with an Access level (issue #90)", async () => {
+		for (const access of [0, 1]) {
+			const collector = new SettingInfoCollector(4, true);
+			const done = await collector.addFrame(longFrame([1, 0, 120, 0, 120], access));
+			expect(done).to.equal(true);
+			expect(collector.info.sc).to.equal(1);
+			expect(collector.info.def).to.equal(120);
+			expect(collector.info.max).to.equal(120);
+		}
+	});
+
+	it("tolerates future bytes and command-looking metadata in known long mode (issue #90)", async () => {
+		const collector = new SettingInfoCollector(4, true);
+		const done = await collector.addFrame(longFrame([0x8a, 0x8b, 0x8c, 0x8d, 120], 1, [0xaa, 0xbb]));
+		expect(done).to.equal(true);
+		expect(collector.info.sc).to.equal(0x8a);
+		expect(collector.info.offset).to.equal(0x8b);
+		expect(collector.info.def).to.equal(0x8c);
+		expect(collector.info.min).to.equal(0x8d);
 		expect(collector.info.max).to.equal(120);
 	});
 

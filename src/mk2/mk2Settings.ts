@@ -53,7 +53,7 @@ export class SettingInfoCollector {
 	readonly info: SettingInfo;
 	private seen = new Set<number>();
 
-	constructor(id: number) {
+	constructor(id: number, private longMode = false) {
 		this.info = {
 			id,
 			supported: true,
@@ -87,10 +87,12 @@ export class SettingInfoCollector {
 		// Long Winmon response observed on 1909209: one 0x89 command followed
 		// directly by Sc, Offset, Default, Minimum and Maximum as five uint16
 		// values. There are no separate 0x8A..0x8D command bytes in this format.
-		// The layout is selected by frame length: packed short frames carry at
-		// most three 3-byte groups (<= 0x0A), so a length-based test cannot be
-		// fooled by a metadata byte that happens to equal 0x8A.
-		if (frame[3] === 0x89 && frame[0] === 0x0d && frame.length === 15) {
+		// The no-Access 0x0D form is known from live captures. In known long mode,
+		// also accept the documented Access byte (0x0E) and future trailing bytes;
+		// packed short frames stay on the legacy parser when long mode is false.
+		const longNoAccess = frame[0] === 0x0d && frame.length === 15;
+		const longWithAccessOrFuture = this.longMode && frame[0] >= 0x0d && frame.length >= 16;
+		if (frame[3] === 0x89 && (longNoAccess || longWithAccessOrFuture)) {
 			const words = [0, 1, 2, 3, 4].map((n) => frame[4 + n * 2] | (frame[5 + n * 2] << 8));
 			const signed = (value: number): number => value >= 0x8000 ? value - 0x10000 : value;
 			this.info.sc = signed(words[0]);
