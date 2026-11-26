@@ -22,7 +22,7 @@ export function veBusFrame(command: number, data: number[] = [], length?: number
 }
 
 export function versionFrame(): Buffer {
-	return mk2Frame(0x56, [0x98, 0x3E, 0x11, 0x00, 0x57]);
+	return mk2Frame(0x56, [0x98, 0x3E, 0x11, 0x00, 0x00]); // VE.Bus mode, address 0 (§3.4)
 }
 
 /** Pack 3-byte Winmon responses into MK2 frames, at most three per frame. */
@@ -47,7 +47,9 @@ export class FakeMk2Serial {
 	private incoming: Buffer[] = [];
 	private buffer = Buffer.alloc(0);
 	private opened = false;
+	openCount = 0;
 	openError?: Error;
+	writeError?: Error;
 	splitResponses = false;
 	/** Optional artificial response delay, for timeout/deadline tests. */
 	responseDelayMs = 0;
@@ -71,6 +73,7 @@ export class FakeMk2Serial {
 	async open(): Promise<void> {
 		if (this.openError) throw this.openError;
 		this.opened = true;
+		this.openCount++;
 	}
 
 	async close(): Promise<void> {
@@ -87,6 +90,7 @@ export class FakeMk2Serial {
 
 	async write(data: Buffer): Promise<void> {
 		this.written.push(data);
+		if (this.writeError) throw this.writeError;
 		if (!this.responseProvider) return;
 		const response = this.responseProvider(data);
 		if (!response) return;
@@ -465,7 +469,7 @@ export class FakeMk2Connection {
 	async communicateMulti(
 		request: Buffer,
 		decode: (response: Buffer) => Promise<boolean>,
-		_options: { allowQuietEnd?: boolean; readTimeoutMs?: number } = {},
+		_options: { readTimeoutMs?: number } = {},
 	): Promise<void> {
 		this.before(request);
 		for (const frame of this.respond(request)) {

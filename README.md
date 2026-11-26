@@ -73,7 +73,7 @@ All states are created below `victron-mk2.<instance>`.
 
 | State | Description |
 | --- | --- |
-| `info.connection` | `true` after a successful poll. A timeout or checksum error closes the port and forces a resynchronisation on the next poll. |
+| `info.connection` | `true` after a successful poll. A timeout, checksum, protocol or serial open/write/read error closes the port and forces a resynchronisation on the next poll. |
 | `info.address`, `info.mk2_version`, `info.mk2_mode` | Device address and MK2 interface information. |
 | `info.device_sw_version`, `info.device_sw_version_text` | Firmware version of the MultiPlus/Quattro. |
 | `diag.timeouts`, `diag.checksum_errors`, `diag.protocol_errors`, `diag.sync_errors` | Error counters since adapter start. |
@@ -138,7 +138,7 @@ accepted it and a readback matched.
 | Symptom | Cause / solution |
 | --- | --- |
 | `EACCES` or `permission denied` | The ioBroker user may not open the port. Add it to `dialout` and restart. |
-| `info.connection` stays `false` | Wrong port, cable/adapter not connected, or another process holds the port. Check `diag.last_error`. |
+| `info.connection` stays `false` | Wrong port, cable/adapter not connected, another process holds the port, or the MK2 reports VE 9-bit mode instead of VE.Bus. Check `diag.last_error`. |
 | Port changes after reboot | Use the stable `/dev/serial/by-id/...` path. |
 | Values stay `null` | The firmware does not provide the value (for example filtered power or SOC without an internal battery monitor). |
 | Device does not respond | Verify 2400 baud and DTR support of the USB adapter; try a higher `responseTimeout`. |

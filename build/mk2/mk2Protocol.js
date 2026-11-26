@@ -880,11 +880,10 @@ class Mk2Protocol {
             return cached;
         }
         const collector = new mk2Settings_1.SettingInfoCollector(id);
-        await this.conn.communicateMulti(this.create_frame("W", Buffer.from([0x35, id & 0xFF, (id >> 8) & 0xFF])), async (frame) => collector.addFrame(frame), { allowQuietEnd: true });
+        await this.conn.communicateMulti(this.create_frame("W", Buffer.from([0x35, id & 0xFF, (id >> 8) & 0xFF])), async (frame) => collector.addFrame(frame));
         if (!collector.isComplete()) {
-            // A quiet end after the first frame is only acceptable for the explicit
-            // "not supported" answer. Anything else would leave min/max unknown and
-            // could later authorize a write with made-up limits (review T2).
+            // Anything incomplete leaves min/max unknown and must not authorize a
+            // write with made-up limits (review T2). Transport errors propagate.
             throw new Error(`getSettingInfo(${id}): incomplete response, refusing to use it`);
         }
         this.settingInfoCache.set(id, collector.info);
