@@ -30,7 +30,7 @@ Hardware und Sicherheitsrandbedingungen:
 
 | Ebene | Ergebnis |
 |---|---|
-| TypeScript-Tests (Mocha) | **274 bestanden, 0 fehlgeschlagen** |
+| TypeScript-Tests (Mocha) | **279 bestanden, 0 fehlgeschlagen** |
 | Paketvalidierung | **61 bestanden, 0 fehlgeschlagen** |
 | `npm run check`, `npm run lint`, `npm run build` | bestanden |
 | Unabhängige statische Protokollreview | durchgeführt; Befunde in #101–#103 bearbeitet |
@@ -104,7 +104,7 @@ erfolgreich live getestet**.
 | #97 | Exakte value-free 0x8E-RAM-Antworten bedeuten „unsupported“; kein anschließender W30-Read. |
 | #98 | W0E und F5 werden nach S gemeinsam gelesen; begrenzte Wartezeit statt Readback zum falschen Zeitpunkt; kein wiederholtes S. |
 | #99 | Übereinstimmende plausible F5-Kandidaten übernehmen ihren gemeinsamen neuen Switch-State statt eines veralteten Cache-Werts. |
-| #100 | Direktes `switch_state(2)` verwendet das erforderliche 0-A-Setpoint statt `0xFFFF`; On stellt das konfigurierte/aktuelle positive Limit wieder her. |
+| #100 | Direktes `switch_state(2)` verwendet das erforderliche 0-A-Setpoint statt `0xFFFF`; On stellt das konfigurierte/aktuelle positive Limit wieder her. Auch vorbereitende Long-Winmon-Setting-Writes bewahren einen bestätigten Zero-Grid-Setpoint; ein mehrdeutiges Minimum wird ohne bekannten Setpoint sicher abgelehnt. |
 | #101 | Alle 0-A-Pfade prüfen PowerAssist und den echten Invert-Hauptzustand; Grid verlangt 7/8/9. Switch-, Main- und verzögertes Limit-Readback werden gemeinsam bestätigt, auch bei direkten Switch-Writes. Fehlendes/mehrdeutiges Readback ist kein Erfolg. Verlorene S-ACKs und Post-Write-Fehler werden nicht automatisch wiederholt. Grid-Readback bleibt unter der Queue-TTL; positive Werte unter 0,05 A werden nicht zu 0 A gerundet. |
 | #102 | AC-/DC-Werte hängen nur von ihrer eigenen Skalierung ab. DMC-Limitbytes werden ignoriert. Bei mehrdeutigem F5-Register bleiben unbewiesene Detailbits null. Die 0x8E-Ausnahme prüft die exakte Framelänge. |
 | #103 | `force_state` prüft Firmware/Unsupported-Antworten und den tatsächlichen Ziel-Substate ohne erneutes Schreiben. Die Control-Reconciliation bildet 7/6/3 korrekt auf 1/2/3 ab. **Nur unit-getestet.** |

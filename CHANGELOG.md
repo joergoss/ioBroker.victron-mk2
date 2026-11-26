@@ -28,7 +28,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Direct Inverter-only control**: `set_switch_state(2)` now writes the
   required 0 A setpoint instead of `0xFFFF`, preventing an ignored limit from
   cancelling zero-grid and returning the device to On. States 1/3 still restore
-  the configured/current positive limit (issue #100).
+  the configured/current positive limit. Long-Winmon setting writes preserve a
+  confirmed zero-grid setpoint and reject an ambiguous minimum until the
+  setpoint is known (issue #100).
 - **Switch-state readback**: refresh W0E and F5 together and allow up to
   15 seconds for state-changing S commands; live 1909209 took about 9 seconds
   to return to Bypass. Grid modes confirm their target switch state without
