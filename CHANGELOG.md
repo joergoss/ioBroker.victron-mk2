@@ -3,6 +3,14 @@
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## __WORK IN PROGRESS__
+
+### Fixed
+
+- **W35 long responses**: documented Access-level responses and future trailing
+  bytes are accepted in known long Winmon mode, while packed short responses
+  remain on the legacy parser (issue #90).
+
 ## 0.4.5 (2026-11-26)
 
 ### Fixed

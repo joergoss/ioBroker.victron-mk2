@@ -942,7 +942,7 @@ export class Mk2Protocol {
 		if (cached && !force) {
 			return cached;
 		}
-		const collector = new SettingInfoCollector(id);
+		const collector = new SettingInfoCollector(id, this.longWinmonFrames);
 		await this.conn.communicateMulti(
 			this.create_frame("W", Buffer.from([0x35, id & 0xFF, (id >> 8) & 0xFF])),
 			async (frame: Buffer) => collector.addFrame(frame),

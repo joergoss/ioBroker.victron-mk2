@@ -879,7 +879,7 @@ class Mk2Protocol {
         if (cached && !force) {
             return cached;
         }
-        const collector = new mk2Settings_1.SettingInfoCollector(id);
+        const collector = new mk2Settings_1.SettingInfoCollector(id, this.longWinmonFrames);
         await this.conn.communicateMulti(this.create_frame("W", Buffer.from([0x35, id & 0xFF, (id >> 8) & 0xFF])), async (frame) => collector.addFrame(frame));
         if (!collector.isComplete()) {
             // Anything incomplete leaves min/max unknown and must not authorize a
