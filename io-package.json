@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "victron-mk2",
-    "version": "0.4.5",
+    "version": "0.4.6",
     "news": {
+      "0.4.6": {
+        "en": "Accept documented long W35 setting-info responses with Access level and future trailing bytes (#90)",
+        "de": "Dokumentierte lange W35-Setting-Info mit Access-Level und zukünftigen Zusatzbytes akzeptieren (#90)",
+        "ru": "Поддержка длинных W35 с Access level и будущими дополнительными байтами (#90)",
+        "pt": "Aceitar W35 longas com nível de acesso e bytes futuros adicionais (#90)",
+        "nl": "Accepteer lange W35-antwoorden met Access-niveau en toekomstige extra bytes (#90)",
+        "fr": "Accepter les W35 longues avec niveau d’accès et futurs octets supplémentaires (#90)",
+        "it": "Accetta risposte W35 lunghe con livello di accesso e futuri byte aggiuntivi (#90)",
+        "es": "Aceptar respuestas W35 largas con nivel de acceso y bytes adicionales futuros (#90)",
+        "pl": "Akceptuj długie odpowiedzi W35 z poziomem dostępu i przyszłymi dodatkowymi bajtami (#90)",
+        "uk": "Підтримка довгих W35 з рівнем доступу та майбутніми додатковими байтами (#90)",
+        "zh-cn": "支持带访问级别和未来附加字节的长 W35 响应 (#90)"
+      },
       "0.4.5": {
         "en": "Harden MK2 serial error recovery, partial-response handling and VE.Bus sync validation (#89/#91/#92)",
         "de": "MK2-Seriell-Recovery, Partial-Response-Behandlung und VE.Bus-Sync-Validierung gehärtet (#89/#91/#92)",
