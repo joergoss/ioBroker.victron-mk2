@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { Mk2Connection } from "./mk2Connection";
 import { Mk2Protocol } from "./mk2Protocol";
+import { SettingInfoCollector } from "./mk2Settings";
 import { Mk2TransportError } from "../lib/errors";
 import { FakeMk2Serial, mk2Frame, veBusFrame, versionFrame } from "../test-utils/fake-mk2";
 
@@ -16,23 +17,21 @@ function connWith(fake: FakeMk2Serial): Mk2Connection {
 	return new Mk2Connection("fake", log as any, fake as any);
 }
 
-/** Fake port that releases queued chunks one readAvailable() call later. */
-class InFlightReadSerial extends FakeMk2Serial {
-	private chunks: Buffer[];
-	private skipReads: number;
-	constructor(chunks: Buffer[], skipReads = 1) {
+/** Fake port that keeps a trailing block in flight until the base frame was read. */
+class DelayedBlockSerial extends FakeMk2Serial {
+	blockReleased = false;
+	private handedOut = 0;
+	constructor(private baseLength: number, private block: Buffer) {
 		super();
-		this.chunks = chunks;
-		this.skipReads = skipReads;
 	}
-	readAvailable(): Buffer | null {
-		const base = super.readAvailable();
-		if (this.skipReads > 0) {
-			this.skipReads--;
-			return base;
+	read(size: number): Buffer | null {
+		const out = super.read(size);
+		if (out) this.handedOut += out.length;
+		if (!this.blockReleased && this.handedOut >= this.baseLength) {
+			this.blockReleased = true;
+			this.push(this.block);
 		}
-		const chunk = this.chunks.shift();
-		return chunk ? (base ? Buffer.concat([base, chunk]) : chunk) : base;
+		return out;
 	}
 }
 
@@ -412,16 +411,60 @@ describe("appended LED status (issue #67)", () => {
 	});
 
 	it("rejects an in-flight legacy external L block instead of guessing (issue #88)", async () => {
-		const live = veBusFrame(0x41, [
+		const base = veBusFrame(0x41, [
 			0x10, 0x10, 0x00, 0x00, 0x04,
 			0x1f, 0x00, 0xa0, 0x00,
 			0x1f, 0x00,
 			0x00, 0x00, 0x67,
-		], 0x8f);
-		const fake = new InFlightReadSerial([Buffer.from([0x4c, 0x10, 0x00]), Buffer.from([0x00])]);
-		fake.push(live);
+		], 0x0f);
+		base[0] |= 0x80;
+		base[base.length - 1] = 0;
+		let sum = 0;
+		for (const b of base) sum += b;
+		base[base.length - 1] = (256 - (sum % 256)) & 0xff;
+
+		const fake = new DelayedBlockSerial(base.length, Buffer.from([0x4c, 0x10, 0x00, 0x00]));
+		fake.push(base);
 		const conn = connWith(fake);
 		await expect(conn.receiveFrame(500)).to.be.rejectedWith("Unsupported LED-appended frame layout");
+		expect(fake.blockReleased).to.equal(true);
+		expect(conn.protocolErrors).to.equal(1);
+		expect(conn.synced).to.equal(false);
+		expect(conn.lastError).to.contain("Unsupported LED-appended frame layout");
+		expect(fake.isOpen()).to.equal(false);
+	});
+
+	it("normalizes a long W35 setting-info response with in-frame LED bytes (issue #88)", async () => {
+		for (const access of [undefined, 1]) {
+			const data = [0x89, 0x9c, 0xff, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00, 0x78, 0x00];
+			if (access !== undefined) data.push(access);
+			const base = mk2Frame(0x57, data);
+			expect(base[0]).to.equal(access === undefined ? 0x0d : 0x0e);
+
+			const appended = Buffer.alloc(base.length + 2);
+			appended[0] = (base[0] + 2) | 0x80;
+			base.copy(appended, 1, 1, base.length - 1);
+			appended[appended.length - 3] = 0x10;
+			appended[appended.length - 2] = 0x00;
+			let sum = 0;
+			for (const b of appended.subarray(0, -1)) sum += b;
+			appended[appended.length - 1] = (256 - (sum % 256)) & 0xff;
+
+			const fake = new FakeMk2Serial();
+			fake.push(appended);
+			const conn = connWith(fake);
+			const result = await conn.receiveFrame(200);
+			expect(result.equals(base)).to.equal(true);
+
+			const collector = new SettingInfoCollector(4, true);
+			expect(await collector.addFrame(result)).to.equal(true);
+			expect(collector.info.supported).to.equal(true);
+			expect(collector.info.sc).to.equal(-100);
+			expect(collector.info.scale).to.equal(0.01);
+			expect(collector.info.def).to.equal(120);
+			expect(collector.info.min).to.equal(0);
+			expect(collector.info.max).to.equal(120);
+		}
 	});
 });
 
