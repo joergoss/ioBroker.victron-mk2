@@ -3,6 +3,14 @@
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## __WORK IN PROGRESS__
+
+### Fixed
+
+- **Unsupported RAM responses**: value-free 0x8E replies now mean unsupported
+  variable, so metadata parsing and the null read path work without issuing W30
+  (issue #97).
+
 ## 0.4.7 (2026-11-26)
 
 ### Fixed

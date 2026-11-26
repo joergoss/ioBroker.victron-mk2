@@ -1030,6 +1030,13 @@ export class Mk2Protocol {
 			if (response[1] != 0xff || response[2] != 0x57) {
 				throw new Error("getRamInfo: not a Winmon response frame");
 			}
+			// Value-free 0x8E is the short-form "unsupported" answer used by
+			// 1909209: no Sc/Offset bytes follow (§7.3.9).
+			if (response[0] <= 0x04 && response[3] === 0x8e) {
+				const unsupported = makeRamInfo(id, 0, 0);
+				this.ramInfoCache.set(id, unsupported);
+				return;
+			}
 			// Unsupported variables answer with only 0x8E <Sc=0> and no 0x8F
 			// offset (§7.3.9), so the frame is shorter than the usual 0x08.
 			// Parse by W frame content instead of by a fixed length.

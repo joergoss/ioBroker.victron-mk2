@@ -194,6 +194,8 @@ export class FakeMk2Connection {
 	longSettingInfoResponse = false;
 	/** Omit value bytes in unsupported setting responses, as observed on 1909209. */
 	minimalUnsupportedSettingResponses = false;
+	/** Omit value bytes in unsupported RAM responses, as observed on 1909209. */
+	minimalUnsupportedRamResponses = false;
 	/** Protocol §5 FlagsExt0 bit 0: MK2 converts long Winmon frames to short. */
 	shortWinmonCompatibility = false;
 	/** Simulate 1909209 rejecting legacy setting writes while in long mode. */
@@ -418,6 +420,9 @@ export class FakeMk2Connection {
 						offset = override.offset;
 					}
 					if (sc == 0) {
+						if (this.minimalUnsupportedRamResponses) {
+							return [mk2Frame(0x57, [0x8e])];
+						}
 						// Real devices answer unsupported variables with only the
 						// Sc frame and no offset (protocol §7.3.9).
 						return [mk2Frame(0x57, [0x8e, 0x00, 0x00])];
