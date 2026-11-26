@@ -318,8 +318,9 @@ export class Mk2Connection {
 				}
 			}
 
-			// Bit 7 of the length byte means an LED status frame is appended;
-			// it must not be counted as part of the frame length.
+			// Bit 7 of the length byte marks appended LED status data (the
+			// documented in-frame bytes or a legacy external L block); it must
+			// not be counted as part of the frame length.
 			const len = this.rxBuffer[0] & 0x7F;
 			const ledAppended = (this.rxBuffer[0] & 0x80) !== 0;
 			if (len == 0) {
