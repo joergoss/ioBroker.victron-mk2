@@ -265,21 +265,28 @@ class VictronMk2 extends utils.Adapter {
                 const pending = this.toSendQueue.splice(0);
                 const offDropped = pending.filter((item) => !(0, state_gate_1.controlAllowedWhileOff)(item.name));
                 const powerOnControls = pending.filter((item) => (0, state_gate_1.controlAllowedWhileOff)(item.name));
-                for (const item of offDropped) {
-                    const reason = "device is Off: only switch_state/grid_mode writes are allowed";
-                    this.log.warn(`${item.name}: ${reason}`);
-                    (0, send_queue_1.reportControlError)(mk2, item, reason);
-                    await this.reconcileDroppedControl(item);
-                }
                 const hadPowerOnRequest = powerOnControls.length > 0;
                 const needsPowerAssist = powerOnControls.some((item) => (item.name === "control.grid_mode" && (item.value === 1 || item.value === 2))
                     || (item.name === "control.switch_state" && item.value === 2));
-                if (needsPowerAssist) {
-                    // Grid modes 1/2 and direct switch 2 need AssistEnabled for 0 A validation.
-                    // Read just Flags0 instead of restoring the full-poll dependency.
-                    await mk2.get_flags();
+                try {
+                    for (const item of offDropped) {
+                        const reason = "device is Off: only switch_state/grid_mode writes are allowed";
+                        this.log.warn(`${item.name}: ${reason}`);
+                        (0, send_queue_1.reportControlError)(mk2, item, reason);
+                        await this.reconcileDroppedControl(item);
+                    }
+                    if (needsPowerAssist) {
+                        // Grid modes 1/2 and direct switch 2 need AssistEnabled for 0 A validation.
+                        // Read just Flags0 instead of restoring the full-poll dependency.
+                        await mk2.get_flags();
+                    }
+                    await this.processToSendQueue(powerOnControls);
                 }
-                await this.processToSendQueue(powerOnControls);
+                finally {
+                    // processQueue consumes only completed/dropped entries. Everything
+                    // left belongs before newer events for the next Off cycle.
+                    this.toSendQueue = [...powerOnControls, ...this.toSendQueue];
+                }
                 if (this.modelPopulated) {
                     await this.publishStates();
                 }

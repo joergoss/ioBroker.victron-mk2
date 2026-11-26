@@ -258,7 +258,7 @@ describe("v0.4.8 protocol-audit regressions", () => {
 			expect((p as any).ramInfoCache.has(0)).to.equal(false);
 		});
 
-		it("keeps the documented short W36 pair valid after long device identification", async () => {
+		it("rejects an ambiguous short-pair/long+trailer W36 response in long mode", async () => {
 			const fake = new FakeMk2Connection();
 			fake.deviceSwVersion = 1909209;
 			fake.longSoftwareVersionResponse = true;
@@ -267,9 +267,25 @@ describe("v0.4.8 protocol-audit regressions", () => {
 			p.conn.communicateMulti = async (_request, decode) => {
 				await decode(mk2Frame(0x57, [0x8e, 0x30, 0x78, 0x8f, 0xcd, 0]));
 			};
-			const info = await p.getRamInfo(8);
-			expect(info.offset).to.equal(205);
-			expect(info.sc).to.equal(0x7830);
+			await expect(p.getRamInfo(8)).to.be.rejectedWith("ambiguous short-pair/long+trailer");
+			expect((p as any).ramInfoCache.has(8)).to.equal(false);
+		});
+
+		it("accepts unambiguous long W36 responses with trailing bytes", async () => {
+			for (const test of [
+				{ data: [0x8e, 0x2f, 0x7c, 0xcd, 0, 0x55], offset: 205 },
+				{ data: [0x8e, 0x2f, 0x7c, 0x8f, 0, 0x11, 0x22], offset: 143 },
+			]) {
+				const fake = new FakeMk2Connection();
+				fake.deviceSwVersion = 1909209;
+				fake.longSoftwareVersionResponse = true;
+				const p = protocolWith(fake);
+				await p.loadDeviceInfo();
+				p.conn.communicateMulti = async (_request, decode) => {
+					await decode(mk2Frame(0x57, test.data));
+				};
+				expect((await p.getRamInfo(8)).offset).to.equal(test.offset);
+			}
 		});
 
 		it("parses long RAM metadata before short triplets when offset-low is 0x8f", async () => {

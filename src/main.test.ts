@@ -563,6 +563,27 @@ describe("adapter lifecycle", () => {
 		expect(adapter.toSendQueue[0]).to.include({ name: "control.IBatBulk", value: 100 });
 	});
 
+	it("retries an unprocessed power-on control after an Off F5 failure", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		adapter.staleControlsChecked = true;
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		fake.limit = 5;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		adapter.mk2 = protocol;
+		adapter.toSendQueue = [{ name: "control.switch_state", value: 3, attempts: 0 }];
+		fake.failNext = "ff4605";
+		await adapter.updateStates();
+		expect(fake.switchState).to.equal(4);
+		expect(adapter.toSendQueue).to.have.length(1);
+		await adapter.updateStates();
+		expect(fake.switchState).to.equal(3);
+		expect(adapter.toSendQueue).to.have.length(0);
+		expect(adapter.states["control.switch_state"]).to.include({ val: 3, ack: true });
+	});
+
 	it("does not begin another state write after a blocked write outlives unload", async () => {
 		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
 		const model: Record<string, any> = {

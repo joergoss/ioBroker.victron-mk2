@@ -1280,15 +1280,15 @@ export class Mk2Protocol {
 					}
 					throw new Error("getRamInfo: incomplete scale response");
 				}
-				// The documented short pair remains valid in long mode. Check its
-				// command shape before the flat mode-2 layout (#107/#115).
-				const shortPair = response[0] === 0x08 && response[3] === 0x8e && response[6] === 0x8f;
-				// Mode 2 is flat: 0x8E ScLo ScHi OffsetLo OffsetHi. Detect it
-				// before other triplets so payload 0x8F is never a command.
-				const longResponse = !shortPair && response[3] === 0x8e && response[0] >= 0x07
-					&& ((response[0] === 0x07 && response.length === 9)
-						|| (longMode && (response[0] - 2) % 3 !== 0));
+				// Mode 2 is flat: 0x8E ScLo ScHi OffsetLo OffsetHi. Only len=8
+				// with Offset-Low 0x8F is indistinguishable from a short pair;
+				// reject it rather than caching a guessed offset (#107/#115).
+				const longResponse = response[3] === 0x8e && response[0] >= 0x07
+					&& (longMode || (response[0] === 0x07 && response.length === 9));
 				if (longResponse) {
+					if (longMode && response[0] === 0x08 && response[6] === 0x8f) {
+						throw new Error("getRamInfo: ambiguous short-pair/long+trailer response");
+					}
 					const rawSc = response[4] | (response[5] << 8);
 					const rawOffset = response[6] | (response[7] << 8);
 					sc = rawSc >= 0x8000 ? rawSc - 0x10000 : rawSc;
