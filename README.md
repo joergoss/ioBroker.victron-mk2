@@ -103,7 +103,7 @@ accepted it and a readback matched.
 | State | Values | Description |
 | --- | --- | --- |
 | `control.set_assist` | `0 … assist.maxlimit` A | AC input current limit. `0 A` is a valid zero-grid mode when PowerAssist is enabled. The value is clamped to the device maximum. |
-| `control.switch_state` | `1` charger only, `2` inverter only, `3` on, `4` off | VE.Bus switch state. State 2 deliberately writes `0 A` as required for Invert mode; states 1/3 restore the configured or current positive limit. |
+| `control.switch_state` | `1` charger only, `2` inverter only, `3` on, `4` off | VE.Bus switch state. State 2 deliberately writes the required `0 A` setpoint for Invert mode and needs PowerAssist enabled; states 1/3 restore the configured or current positive limit. |
 | `control.grid_mode` | `0` grid, `1` zero grid / invert, `2` inverter only | Convenience mode that combines switch state and current limit. |
 | `control.force_state` | `1` equalise, `2` absorption, `3` float | Forces and verifies a charge phase on firmware revision 400+. Equalise is a battery maintenance action; use it deliberately. |
 | `control.DisableCharge`, `control.WeakACInput`, `control.IBatBulk` | see object | Charger, weak-AC and bulk-current settings with validated writes. |
@@ -139,7 +139,8 @@ accepted it and a readback matched.
   control write is dropped.
   `control.grid_mode = 0` while Off is rejected unless a configured or current
   AC input limit is known; it never falls back to 16 A or the device maximum.
-  Grid modes 1 and 2 read Flags0 directly for their PowerAssist validation.
+  Grid modes 1 and 2 and direct `control.switch_state = 2` read Flags0
+  directly for their PowerAssist validation.
 
 ## Troubleshooting
 
