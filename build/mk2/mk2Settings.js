@@ -18,14 +18,17 @@ function settingScale(sc) {
         return 1 / -sc;
     return 1;
 }
-/** DisplayValue := Scale * (x + Offset) */
+/**
+ * DisplayValue := Scale * (x + Offset). Setting 63 is the exception: its legacy
+ * metadata reports Offset 0 while the raw value uses 0x8000 as zero, so that
+ * bias is applied here. Metadata with Offset -32768 already carries it and must
+ * not be biased twice (#85).
+ */
 function settingDisplayValue(info, raw) {
-    // Setting 63 uses 0x8000 as its zero point. Some firmware already exposes
-    // that bias as metadata Offset=-32768; applying both would double-bias it.
-    // Offset 0 is the legacy form that still needs the explicit raw bias (#85).
     const value = info.id === 63 && info.offset === 0 ? raw - 0x8000 : raw;
     return info.scale * (value + info.offset);
 }
+/** Inverse of settingDisplayValue, including the setting 63 bias. */
 function settingRawValue(info, display) {
     const value = Math.round(display / info.scale - info.offset);
     return info.id === 63 && info.offset === 0 ? value + 0x8000 : value;
