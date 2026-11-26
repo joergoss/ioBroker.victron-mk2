@@ -1081,7 +1081,9 @@ export class Mk2Protocol {
 			return;
 		}
 		const limit = this.mk2Model["assist.limit"].value
-		const rawLimit = typeof limit === "number" && limit > 0 ? Math.round(limit * 10) : 0xFFFF
+		const rawLimit = this.currentSwitchState === 2
+			? 0
+			: typeof limit === "number" && limit > 0 ? Math.round(limit * 10) : 0xFFFF
 		const data = Buffer.from([
 			this.currentSwitchState, rawLimit & 0xFF, (rawLimit >> 8) & 0xFF, 0x01, 0x80,
 			0x00, 0x01, 0x00,

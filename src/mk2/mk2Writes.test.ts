@@ -145,6 +145,30 @@ describe("long Winmon firmware writes (1909209)", () => {
 		expect(modeRequest[5]).to.equal(0xff);
 		expect(modeRequest[10]).to.equal(0x00);
 	});
+
+	it("keeps Inverter only when a setting write follows grid_mode=2 (issue #100)", async () => {
+		const fake = new FakeMk2Connection();
+		fake.deviceSwVersion = 1909209;
+		fake.longSoftwareVersionResponse = true;
+		fake.longSettingInfoResponse = true;
+		const p = protocolWith(fake);
+		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.loadDeviceInfo();
+		await p.set_grid_mode(2);
+		expect(p.mk2Model["switch.state"].value).to.equal(2);
+		expect(fake.limit).to.equal(0);
+		fake.requests.length = 0;
+		await p.writeSetting(0, 0x89f0);
+		const modeRequest = fake.requests.find((r) => r[2] == 0x53 && r[9] == 0x01);
+		// The preparatory S frame must not send the ignored limit 0xFFFF or a
+		// nonzero minimum: that cancels Inverter only and returns the unit to On.
+		expect(modeRequest).to.not.equal(undefined);
+		expect(modeRequest![3]).to.equal(2);
+		expect(modeRequest![4]).to.equal(0);
+		expect(modeRequest![5]).to.equal(0);
+		expect(fake.flags0).to.equal(0x89f0);
+		expect(fake.switchState).to.equal(2);
+	});
 });
 
 describe("scaled setting writes (issue #10)", () => {
