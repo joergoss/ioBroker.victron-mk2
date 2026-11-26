@@ -92,7 +92,7 @@ export class Mk2Model {
 	};
 
 	"diag.protocol_errors":    Mk2DataEntry = {
-		descr: "Protocol/stream errors (e.g. invalid frame length) since adapter start",
+		descr: "Protocol/stream and serial I/O errors (e.g. invalid frame length, open/write failure) since adapter start",
 		unit:  "",
 		role:  "value",
 		type: "number",
@@ -100,7 +100,7 @@ export class Mk2Model {
 	};
 
 	"diag.sync_errors":    Mk2DataEntry = {
-		descr: "Failed MK2 synchronisations (no version frame) since adapter start",
+		descr: "Failed MK2 synchronisations (missing version frame or VE 9-bit mode) since adapter start",
 		unit:  "",
 		role:  "value",
 		type: "number",

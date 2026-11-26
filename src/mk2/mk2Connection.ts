@@ -286,7 +286,7 @@ export class Mk2Connection {
 					spezial == mk2SpezialFrame.masterMultiLed ||
 					spezial == mk2SpezialFrame.ramReadOk
 				) {
-						if (await decode(frame)) {
+					if (await decode(frame)) {
 						return;
 					}
 				}
