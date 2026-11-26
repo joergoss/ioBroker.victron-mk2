@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "victron-mk2",
-    "version": "0.4.6",
+    "version": "0.4.7",
     "news": {
+      "0.4.7": {
+        "en": "Normalize documented in-frame LED append and reject unsupported layouts without corrupting frames (#88)",
+        "de": "Dokumentiertes In-frame-LED-Append normalisieren und unbekannte Layouts ohne Frame-Beschädigung ablehnen (#88)",
+        "ru": "Нормализованы LED-данные внутри кадра и отклонены неизвестные форматы без повреждения кадров (#88)",
+        "pt": "Normalizar LED append dentro do quadro e rejeitar layouts desconhecidos sem corromper quadros (#88)",
+        "nl": "Documented in-frame LED append normaliseren en onbekende layouts zonder framecorruptie afwijzen (#88)",
+        "fr": "Normaliser les LED dans la trame et rejeter les layouts inconnus sans corrompre les trames (#88)",
+        "it": "Normalizza l'append LED documentata nel frame e rifiuta layout sconosciuti senza corrompere i frame (#88)",
+        "es": "Normaliza el LED dentro de la trama y rechaza diseños desconocidos sin corromper tramas (#88)",
+        "pl": "Normalizowane są dane LED w ramce, a nieznane układy odrzucane bez uszkodzenia ramek (#88)",
+        "uk": "Нормалізовано LED-дані у кадрі та відхилено невідомі формати без пошкодження кадрів (#88)",
+        "zh-cn": "规范化帧内 LED 数据并拒绝未知布局而不损坏帧 (#88)"
+      },
       "0.4.6": {
         "en": "Accept documented long W35 setting-info responses with Access level and future trailing bytes (#90)",
         "de": "Dokumentierte lange W35-Setting-Info mit Access-Level und zukünftigen Zusatzbytes akzeptieren (#90)",
