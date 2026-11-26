@@ -82,6 +82,8 @@ class Mk2Connection {
         this.responseTimeoutMs = 5000;
         /** Receive accumulator; bytes after a complete frame stay for the next read. */
         this.rxBuffer = Buffer.alloc(0);
+        /** Set when the current sync attempt rejected a mode-0x57 version frame. */
+        this.ve9BitModeSeen = false;
         this.closedDown = false;
         /** Serialises every exchange; the tail continues even after a failure. */
         this.queueTail = Promise.resolve();
@@ -102,12 +104,17 @@ class Mk2Connection {
             // After shutdown an in-flight iteration must not reopen the port (N3).
             throw new errors_1.Mk2TransportError("connection is shut down");
         }
-        if (!this.port.isOpen()) {
-            this.synced = false;
-            await this.port.open();
+        try {
+            if (!this.port.isOpen()) {
+                this.synced = false;
+                await this.port.open();
+            }
+            if (!this.synced) {
+                await this.sync();
+            }
         }
-        if (!this.synced) {
-            await this.sync();
+        catch (error) {
+            return await this.failIo("serial open/sync", error);
         }
     }
     /** Permanently close the connection; a later ensureSynced() rejects. */
@@ -131,33 +138,39 @@ class Mk2Connection {
      * remaining bytes for the next read.
      */
     async sync() {
-        if (!this.port.isOpen()) {
-            await this.port.open();
-        }
-        await this.discardInput();
-        const deadline = Date.now() + 5000;
-        while (Date.now() < deadline) {
-            // read() without a size returns everything buffered. A sized read would
-            // return null until that many bytes are available, which would stall
-            // the synchronisation forever on a 9-byte version frame.
-            const chunk = this.port.readAvailable();
-            if (chunk) {
-                this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
+        try {
+            this.ve9BitModeSeen = false;
+            if (!this.port.isOpen()) {
+                await this.port.open();
             }
-            if (this.extractVersionFrame()) {
-                this.synced = true;
-                this.generation++;
-                this.log.debug("sync: version frame received");
-                return;
+            await this.discardInput();
+            const deadline = Date.now() + 5000;
+            while (Date.now() < deadline) {
+                // read() without a size returns everything buffered. A sized read would
+                // return null until that many bytes are available, which would stall
+                // the synchronisation forever on a 9-byte version frame.
+                const chunk = this.port.readAvailable();
+                if (chunk) {
+                    this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
+                }
+                if (this.extractVersionFrame()) {
+                    this.synced = true;
+                    this.generation++;
+                    this.log.debug("sync: version frame received");
+                    return;
+                }
+                await sleep(20);
             }
-            await sleep(20);
+            this.synced = false;
+            // A failed sync is a transport failure and must be visible in diag.* (N10).
+            const message = this.ve9BitModeSeen
+                ? "MK2 reports VE 9-bit mode instead of VE.Bus"
+                : "Sync - receive no version frame - no mk2 connected ?";
+            await this.fail("sync", message);
         }
-        this.synced = false;
-        // A failed sync is a transport failure and must be visible in diag.* (N10).
-        const message = this.mk2Mode === 0x57
-            ? "MK2 reports VE 9-bit mode instead of VE.Bus"
-            : "Sync - receive no version frame - no mk2 connected ?";
-        await this.fail("sync", message);
+        catch (error) {
+            return await this.failIo("serial sync", error);
+        }
     }
     /** Find a complete, checksum-valid 'V' frame anywhere in the rx buffer. */
     extractVersionFrame() {
@@ -193,6 +206,7 @@ class Mk2Connection {
             if (this.mk2Mode === 0x57) {
                 // Mode W is VE 9-bit RS485, not VE.Bus. Keep scanning for a valid
                 // later VE.Bus frame, but never declare operational sync here.
+                this.ve9BitModeSeen = true;
                 this.log.warn("MK2 reports VE 9-bit mode; VE.Bus sync required");
                 continue;
             }

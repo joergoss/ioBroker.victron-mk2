@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { Mk2Connection } from "./mk2Connection";
+import { Mk2Protocol } from "./mk2Protocol";
 import { Mk2TransportError } from "../lib/errors";
 import { FakeMk2Serial, mk2Frame, versionFrame } from "../test-utils/fake-mk2";
 
@@ -415,6 +416,41 @@ describe("transport error boundaries (issues #89, #91, #92)", () => {
 		expect(conn.lastError).to.contain("open callback failed");
 	});
 
+	it("normalizes the first open through ensureSynced (issue #89)", async () => {
+		const fake = new FakeMk2Serial();
+		fake.openError = new Error("device missing");
+		const conn = connWith(fake);
+		let caught: unknown;
+		try {
+			await conn.ensureSynced();
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).to.be.instanceOf(Mk2TransportError);
+		expect((caught as Error).message).to.contain("device missing");
+		expect(conn.synced).to.equal(false);
+		expect(conn.protocolErrors).to.equal(1);
+		expect(conn.lastError).to.contain("device missing");
+		expect(fake.isOpen()).to.equal(false);
+	});
+
+	it("publishes open-failure diagnostics from pollStateOnly (issue #89)", async () => {
+		const fake = new FakeMk2Serial();
+		fake.openError = new Error("device missing");
+		const conn = connWith(fake);
+		const protocol = new Mk2Protocol("fake", log as any, conn);
+		let caught: unknown;
+		try {
+			await protocol.pollStateOnly();
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).to.be.instanceOf(Mk2TransportError);
+		expect(protocol.mk2Model["diag.last_error"].value).to.contain("device missing");
+		expect(protocol.mk2Model["diag.protocol_errors"].value).to.equal(1);
+		expect(protocol.mk2Model["diag.sync_errors"].value).to.equal(0);
+	});
+
 	it("does not turn a partial multi-frame timeout into a quiet end (issue #92)", async () => {
 		const firstFragment = mk2Frame(0x57, [0x89, 0x9c, 0x7f]);
 		const fake = new FakeMk2Serial((request) => request[2] === 0x57 ? firstFragment : null);
@@ -447,5 +483,18 @@ describe("transport error boundaries (issues #89, #91, #92)", () => {
 		await expect(conn.sync()).to.be.rejectedWith("no version frame");
 		expect(conn.synced).to.equal(false);
 		expect(conn.syncErrors).to.equal(1);
+	});
+
+	it("does not reuse a VE 9-bit diagnostic for a later failed attempt (issue #91)", async function () {
+		this.timeout(15000);
+		const fake = new FakeMk2Serial();
+		fake.push(mk2Frame(0x56, [0x98, 0x3e, 0x11, 0x00, 0x57]));
+		const conn = connWith(fake);
+		await expect(conn.sync()).to.be.rejectedWith("VE 9-bit");
+		// The device is back on VE.Bus (or gone): no version frame arrives at all.
+		await expect(conn.sync()).to.be.rejectedWith("no version frame");
+		expect(conn.lastError).to.contain("no version frame");
+		expect(conn.lastError).to.not.contain("VE 9-bit");
+		expect(conn.syncErrors).to.equal(2);
 	});
 });
