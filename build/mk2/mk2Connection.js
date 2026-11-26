@@ -361,9 +361,9 @@ class Mk2Connection {
             frame[0] &= 0x7f;
             if (ledAppended) {
                 // Appendix 1 carries LED on/blink inside the checksummed frame.
-                // Consume an immediately buffered legacy external L block when
-                // present, otherwise strip the in-frame bytes without waiting (#88).
-                if (!this.discardAppendedLedStatus()) {
+                // A legacy firmware instead sends a separate external L block;
+                // consume it when it arrives, otherwise strip the in-frame bytes (#88).
+                if (!(await this.discardAppendedLedStatus())) {
                     if (frame.length < 5) {
                         await this.fail("protocol", "LED-appended frame too short");
                     }
@@ -375,23 +375,47 @@ class Mk2Connection {
         await this.fail("timeout", "Timeout waiting for MK2 frame");
         throw new Error("unreachable");
     }
-    /** Consume an immediately buffered legacy external L block, if present. */
-    discardAppendedLedStatus() {
-        // Pull bytes already buffered by the driver, but never wait for a late
-        // external block: the documented in-frame variant needs no grace delay.
-        const chunk = this.port.readAvailable();
-        if (chunk) {
-            this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
+    /**
+     * Consume a legacy external L block after a frame with the LED bit.
+     *
+     * The block follows the base frame immediately on the wire, so probe briefly
+     * for its first byte instead of assuming the frame carries the documented
+     * in-frame bytes. Returns true only when an external block was consumed.
+     */
+    async discardAppendedLedStatus() {
+        const probeEnd = Date.now() + 25;
+        while (this.rxBuffer.length < 1 && Date.now() < probeEnd) {
+            const chunk = this.port.readAvailable();
+            if (chunk) {
+                this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
+            }
+            else {
+                await sleep(5);
+            }
         }
-        if (this.rxBuffer.length >= 3 && this.rxBuffer[0] == 0x4c) {
-            // Older firmware appends a trailing 0x00 that would otherwise be
-            // read as the next frame length (0 -> protocol error).
-            const consume = this.rxBuffer.length >= 4 && this.rxBuffer[3] == 0x00 ? 4 : 3;
-            this.log.debug("discarding external LED status block");
-            this.rxBuffer = this.rxBuffer.slice(consume);
-            return true;
+        if (this.rxBuffer.length < 1 || this.rxBuffer[0] != 0x4c) {
+            return false;
         }
-        return false;
+        // Older firmware appends a trailing 0x00 that would otherwise be read as
+        // the next frame length (0 -> protocol error). Read the whole block so a
+        // split 4-byte variant does not leave that byte behind.
+        const blockEnd = Date.now() + 25;
+        while (this.rxBuffer.length < 4 && Date.now() < blockEnd) {
+            const chunk = this.port.readAvailable();
+            if (chunk) {
+                this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
+            }
+            else {
+                await sleep(5);
+            }
+        }
+        if (this.rxBuffer.length < 3) {
+            await this.fail("timeout", "Timeout while receiving appended LED status block");
+        }
+        const consume = this.rxBuffer.length >= 4 && this.rxBuffer[3] == 0x00 ? 4 : 3;
+        this.log.debug("discarding external LED status block");
+        this.rxBuffer = this.rxBuffer.slice(consume);
+        return true;
     }
     /** Strip the documented in-frame LED on/blink bytes and rebuild the base frame. */
     removeInFrameLedStatus(frame) {

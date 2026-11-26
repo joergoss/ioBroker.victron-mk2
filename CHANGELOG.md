@@ -8,9 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - **LED append layout**: the documented in-frame LED on/blink bytes are
-  separated from the checksummed base frame without an extra wait, so extended
-  F5/W35 decoders cannot misread them; the buffered legacy external L block
-  remains supported (issue #88).
+  separated from the checksummed base frame without the former grace delay, so
+  extended F5/W35 decoders cannot misread them; the legacy external L block is
+  still consumed, including when it trails the frame on the wire (issue #88).
 
 ## 0.4.6 (2026-11-26)
 

@@ -2,7 +2,7 @@ import { expect } from "chai";
 import { Mk2Connection } from "./mk2Connection";
 import { Mk2Protocol } from "./mk2Protocol";
 import { Mk2TransportError } from "../lib/errors";
-import { FakeMk2Serial, mk2Frame, versionFrame } from "../test-utils/fake-mk2";
+import { FakeMk2Serial, mk2Frame, veBusFrame, versionFrame } from "../test-utils/fake-mk2";
 
 const log = {
 	level: "info",
@@ -14,6 +14,26 @@ const log = {
 
 function connWith(fake: FakeMk2Serial): Mk2Connection {
 	return new Mk2Connection("fake", log as any, fake as any);
+}
+
+/** Fake port that releases queued chunks one readAvailable() call later. */
+class InFlightReadSerial extends FakeMk2Serial {
+	private chunks: Buffer[];
+	private skipReads: number;
+	constructor(chunks: Buffer[], skipReads = 1) {
+		super();
+		this.chunks = chunks;
+		this.skipReads = skipReads;
+	}
+	readAvailable(): Buffer | null {
+		const base = super.readAvailable();
+		if (this.skipReads > 0) {
+			this.skipReads--;
+			return base;
+		}
+		const chunk = this.chunks.shift();
+		return chunk ? (base ? Buffer.concat([base, chunk]) : chunk) : base;
+	}
 }
 
 describe("Mk2Connection", () => {
@@ -380,6 +400,7 @@ describe("appended LED status (issue #67)", () => {
 
 	it("normalizes the documented in-frame LED append without waiting (issue #88)", async () => {
 		// Appendix 1: 84 FF 'S' <LED-on> <LED-blink> <Checksum>.
+		// The base frame is 02 FF 'S' AC: sum(02 FF 53) = 0x154 -> 0xAC.
 		const frame = Buffer.from([0x84, 0xff, 0x53, 0x01, 0x00, 0x00]);
 		let sum = 0;
 		for (const b of frame.subarray(0, -1)) sum += b;
@@ -390,8 +411,29 @@ describe("appended LED status (issue #67)", () => {
 		const start = Date.now();
 		const result = await conn.receiveFrame(200);
 		expect(Date.now() - start).to.be.lessThan(80);
-		expect(result[0]).to.equal(2); // base S response without LED bytes
-		expect(result[2]).to.equal(0x53);
+		expect(result.equals(Buffer.from([0x02, 0xff, 0x53, 0xac]))).to.equal(true);
+	});
+
+	it("keeps an in-flight legacy external L block out of the base frame (issue #88)", async () => {
+		const live = veBusFrame(0x41, [
+			0x10, 0x10, 0x00, 0x00, 0x04,
+			0x1f, 0x00, 0xa0, 0x00,
+			0x1f, 0x00,
+			0x00, 0x00, 0x67,
+		], 0x8f);
+		const expected = Buffer.from(live);
+		expected[0] &= 0x7f;
+		// The external block trails the frame on the wire: it is not available
+		// when the base frame completes, and its trailing 0x00 arrives later.
+		const fake = new InFlightReadSerial([Buffer.from([0x4c, 0x10, 0x00]), Buffer.from([0x00])]);
+		fake.push(live);
+		const conn = connWith(fake);
+		const base = await conn.receiveFrame(500);
+		expect(base.equals(expected)).to.equal(true);
+		const next = mk2Frame(0x41, [0x01, 0x00]);
+		fake.push(next);
+		const second = await conn.receiveFrame(500);
+		expect(second.equals(next)).to.equal(true);
 	});
 });
 
