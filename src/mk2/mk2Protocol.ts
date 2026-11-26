@@ -482,14 +482,14 @@ export class Mk2Protocol {
 				return;
 			}
 
-			// §6.2: the switch register follows the three limits. The documented
-			// 0x0D layout puts it at index 13. Longer answers may append or insert
-			// bytes; the live 1909209 frame (0F 41 10 10 00 00 04 1F 00 A0 00 1F
-			// 00 00 00 67 47) has it at the last data byte. With a usable main
-			// state the candidates are checked against the independently read
-			// state.state, but main Off does not imply switch Off: there the
-			// extended (last) byte wins (#86). Ambiguous registers keep the
-			// already published state instead of guessing on one frame.
+			// §6.2: the switch register follows the three limits; the documented 0x0D
+			// layout puts it at index 13. Longer answers may append or insert bytes; the
+			// live 1909209 frame (0F 41 10 10 00 00 04 1F 00 A0 00 1F 00 00 00 67 47)
+			// has it at the last data byte. Main Off does not imply switch Off: the
+			// last byte wins for that layout while main is Off or not yet known (#86).
+			// Other ambiguous extended layouts while Off publish unknown instead of guessing.
+			// With a usable main state the candidates are checked against state.state;
+			// remaining ambiguity keeps the already published state, or unknown if none.
 			const len = response[0] & 0x7f
 			const fixedIndex = 0x0d
 			const candidates: number[] = []
