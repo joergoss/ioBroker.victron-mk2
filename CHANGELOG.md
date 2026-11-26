@@ -3,6 +3,19 @@
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## __WORK IN PROGRESS__
+
+### Fixed
+
+- **Extended F5 switch register**: main-state Off no longer forces an extended
+  On switch register to be discarded as implausible. Other extended layouts seen
+  while the main state is Off that disagree publish unknown instead of reusing a
+  stale state or interpreting an appended byte as the register. Live frames from
+  1909209 are covered by end-to-end regression tests (issue #86).
+- **Setting 63 bias**: `UBatLowPreAlarmOffset` no longer applies the 0x8000 bias
+  twice when the setting metadata already carries offset -32768. Raw/display
+  conversion is symmetric for both metadata forms (issue #85).
+
 ## 0.4.3 (2026-11-25)
 
 ### Fixed

@@ -426,13 +426,14 @@ class Mk2Protocol {
                 this.log.debug("master_multi_led_info: frame carries no switch register");
                 return;
             }
-            // §6.2: the switch register follows the three limits. The documented
-            // 0x0D layout puts it at index 13. Longer answers may append or insert
-            // bytes; the live 1909209 frame (0F 41 10 10 00 00 04 1F 00 A0 00 1F
-            // 00 00 00 67 47) has it at the last data byte. Select between the
-            // candidates using the independently read state.state, never by an
-            // undocumented flag alone, and publish "unknown" instead of guessing
-            // "Off" when the candidates disagree.
+            // §6.2: the switch register follows the three limits; the documented 0x0D
+            // layout puts it at index 13. Longer answers may append or insert bytes; the
+            // live 1909209 frame (0F 41 10 10 00 00 04 1F 00 A0 00 1F 00 00 00 67 47)
+            // has it at the last data byte. Main Off does not imply switch Off: the
+            // last byte wins for that layout while main is Off or not yet known (#86).
+            // Other ambiguous extended layouts while Off publish unknown instead of guessing.
+            // With a usable main state the candidates are checked against state.state;
+            // remaining ambiguity keeps the already published state, or unknown if none.
             const len = response[0] & 0x7f;
             const fixedIndex = 0x0d;
             const candidates = [];
@@ -444,8 +445,6 @@ class Mk2Protocol {
             const mainState = typeof stateValue === "number" ? Math.floor(stateValue / 10) : 0;
             const plausible = (register) => {
                 const candidateState = (0, mk2Switch_1.switchStateFromRegister)(register);
-                if (mainState === 2)
-                    return candidateState === 4;
                 if (mainState >= 4 && mainState <= 7)
                     return candidateState === 2 || candidateState === 3;
                 if (mainState >= 8 && mainState <= 9)
@@ -456,10 +455,30 @@ class Mk2Protocol {
             if (len === fixedIndex) {
                 switch_register = response[fixedIndex];
             }
+            else if (len === 0x0f && (mainState === 0 || mainState === 1 || mainState === 2)) {
+                // The extended 0x0F layout observed on 1909209 carries the switch
+                // register as its last data byte. This remains valid before the main
+                // state is known and while main-state Off coexists with switch On.
+                switch_register = response[len];
+            }
             else if (mainState === 0 || mainState === 1) {
-                // No usable main state yet: preserve the historical AC-block hint
-                // but do not narrow to Off/Charger only below.
+                // No usable main state yet and no validated extended layout:
+                // preserve the historical AC-block hint without narrowing below.
                 switch_register = (response[3] & 0x10) !== 0 ? response[len] : response[fixedIndex];
+            }
+            else if (mainState === 2) {
+                const uniqueCandidates = [...new Set(candidates)];
+                if (uniqueCandidates.length === 1) {
+                    switch_register = uniqueCandidates[0];
+                }
+                else {
+                    // Other extended layouts are ambiguous. Never use the previous
+                    // state to discard a non-Off register or an appended byte as a
+                    // register; publish unknown instead (#86).
+                    this.log.warn("master_multi_led_info: ambiguous extended frame while Off; switch state unknown");
+                    this.clearSwitchModel();
+                    return;
+                }
             }
             else {
                 const uniqueCandidates = [...new Set(candidates)];
