@@ -748,16 +748,13 @@ export class Mk2Protocol {
 			throw new Mk2ValidationError("set_assist: device switch is Off; use control.switch_state or control.grid_mode to switch it on explicitly")
 		}
 		if (ampere > 0 && this.currentSwitchState === 2) {
-			this.log.warn("set_assist: preserving Inverter only; use grid_mode=0 to enable the AC input explicitly")
+			this.log.warn("set_assist: a positive limit switches the device from Inverter only to On (charger/AC input enabled)")
 		}
 		if (ampere === 0 && this.currentSwitchState === 1) {
 			this.log.debug("set_assist: 0 A selects Invert with PowerAssist, including from Charger only (§5 note 3)")
 		}
 		const minimumCollision = previousConfirmed === 0 && ampere > 0
 			&& typeof previousEffective === "number" && Math.abs(previousEffective * 10 - a) < 0.01
-		if (minimumCollision && this.currentSwitchState === 2) {
-			throw new Mk2ValidationError("set_assist: cannot distinguish a positive setpoint from the previous 0 A minimum readback; use grid_mode=0")
-		}
 		const data = Buffer.from([this.currentSwitchState, a & 0xFF, (a >> 8) & 0xFF, 0x01, 0x80])
 		this.log.debug("******   set_assist")
 		this.confirmedInputCurrentSetpoint = null
@@ -770,7 +767,7 @@ export class Mk2Protocol {
 			// special 0 A setpoint already displays the requested minimum, only a
 			// grid main-state transition proves that the positive write applied (#119).
 			await this.waitForSwitchState(
-				data[0],
+				ampere > 0 && data[0] === 2 ? 3 : data[0],
 				"set_assist",
 				minimumCollision ? [7, 8, 9] : undefined,
 				minimumCollision ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs,

@@ -114,8 +114,11 @@ accepted it and a readback matched.
 
 - **Effective-state readback:** zero-grid/Invert commands are acknowledged only
   after main state 4/5/6; grid mode requires 7/8/9 and the matching panel state.
-  Missing or ambiguous F5 readback is an error, never an optimistic success.
-  Grid transitions may take longer than the panel-register update.
+  Positive limits are checked against the exact raw deciamp value sent. A
+  positive limit sent from Inverter only enables AC input/On on 1909209 and is
+  confirmed with switch state 3. Missing or ambiguous F5 readback is an error,
+  never an optimistic success. Grid transitions may take longer than the
+  panel-register update.
 - **No repeated writes after lost confirmation:** once a request may have been
   sent, a lost acknowledgement or later transport/readback failure is treated
   as an unconfirmed write and is not automatically retried. Inspect the device

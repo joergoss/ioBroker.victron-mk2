@@ -81,13 +81,13 @@ describe("Mk2Protocol control writes", () => {
 		expect(fake.limit).to.equal(10);
 	});
 
-	it("set_assist preserves an explicitly selected switch state", async () => {
+	it("set_assist confirms the live transition from Inverter only to On for a positive limit", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
 		await p.set_switch_state(2);
 		await p.set_assist(10);
-		expect(fake.switchState).to.equal(2);
+		expect(fake.switchState).to.equal(3);
 		expect(fake.limit).to.equal(10);
 	});
 
