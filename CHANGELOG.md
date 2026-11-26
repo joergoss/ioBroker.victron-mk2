@@ -9,8 +9,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **S-command safety and exact readback**: current-limit writes now require a
   proven F5 switch state, compare the exact raw deciamp value actually sent and
-  distinguish special 0 A from a device-minimum readback. A positive limit
-  from Inverter only confirms the measured 1909209 transition to On. Generic
+  distinguish special 0 A from a device-minimum readback, including cold
+  starts and reconnects. A positive limit from Inverter only confirms the
+  measured 1909209 transition to On. Generic
   F5 trailing bytes no longer replace the documented switch register, while the captured
   1909209 layout remains supported, including Off recovery before firmware
   identification (#108, #109, #110, #119).
@@ -21,13 +22,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   avoidance now refreshes model values (#105, #111, #112, #114, #116).
 - **Protocol decoding**: W0E state values are validated, W36 supports complete
   split-frame and long-form metadata without inventing offsets or misreading
-  payload 0x8F, AC signedness follows RAM metadata, scaled period offsets are
+  payload 0x8F, while documented short W36 pairs remain valid in long mode.
+  AC signedness follows RAM metadata, scaled period offsets are
   honored, and standard in-frame LED appends are normalized (#106, #107, #113,
   #115, #117).
 - **Adapter lifecycle and metadata**: unknown AC1 configuration no longer
   creates a maximum-current default, Off-dropped controls report/reconcile
-  their outcome, oversized poll intervals are rejected, and shutdown cancels
-  active work without post-unload state writes (#118, #120, #121, #122).
+  their outcome using an atomic queue snapshot, oversized poll intervals are
+  rejected, and shutdown cancels serial opens, receive loops and each pending
+  state write without post-unload activity (#118, #120, #121, #122).
 
 ## 0.4.8 (2026-11-26)
 

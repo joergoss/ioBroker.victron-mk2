@@ -66,7 +66,7 @@ describe("v0.4.8 protocol-audit regressions", () => {
 			expect(p.mk2Model["switch.state"].value).to.equal(3);
 		});
 
-		it("recognizes the captured 1909209 Off frame before firmware identification", async () => {
+		it("does not promote a generic trailing register when firmware is unknown", async () => {
 			const live = Buffer.from("0f4110000400041f00a0003200008077b0", "hex");
 			const serial = new FakeMk2Serial((request) => {
 				if (request[2] === 0x57 && request[3] === 0x0e) return mk2Frame(0x57, [0x94, 2, 0]);
@@ -76,6 +76,21 @@ describe("v0.4.8 protocol-audit regressions", () => {
 			serial.push(versionFrame());
 			const p = protocolWithSerial(serial);
 			expect(p.mk2Model["info.device_sw_version"].value).to.equal(null);
+			await p.get_state();
+			await p.master_multi_led_info();
+			expect(p.mk2Model["switch.state"].value).to.equal(null);
+			expect(p.hasUnambiguousSwitchState()).to.equal(false);
+		});
+
+		it("accepts agreeing On bits after power-on before firmware identification", async () => {
+			const on = Buffer.from("0f4110010000041f00a000320032007701", "hex");
+			const serial = new FakeMk2Serial((request) => {
+				if (request[2] === 0x57 && request[3] === 0x0e) return mk2Frame(0x57, [0x94, 2, 0]);
+				if (request[2] === 0x46 && request[3] === 0x05) return on;
+				return null;
+			});
+			serial.push(versionFrame());
+			const p = protocolWithSerial(serial);
 			await p.get_state();
 			await p.master_multi_led_info();
 			expect(p.mk2Model["switch.state"].value).to.equal(3);
@@ -137,6 +152,26 @@ describe("v0.4.8 protocol-audit regressions", () => {
 			expect(p.mk2Model["state.state"].value).to.equal(40);
 		});
 
+		it("requires grid proof for a cold special-0-A minimum collision", async () => {
+			for (const directSwitch of [false, true]) {
+				const fake = new FakeMk2Connection();
+				fake.zeroLimitSelectsInverter = false;
+				fake.zeroLimitReportsMinimum = true;
+				fake.linkMainStateToSwitch = false;
+				fake.ignoreAssistWrites = true;
+				fake.currentState = 4;
+				fake.limit = 3.1;
+				const p = protocolWith(fake);
+				p.gridModeReadbackTimeoutMs = 20;
+				p.switchReadbackPollIntervalMs = 1;
+				await p.get_state();
+				await p.master_multi_led_info();
+				expect(p.getConfirmedInputCurrentSetpoint()).to.equal(null);
+				const write = directSwitch ? p.set_switch_state(3) : p.set_assist(3.1);
+				await expect(write).to.be.rejectedWith("main state is 4 instead of 7/8/9");
+			}
+		});
+
 		it("preserves a proven cold 0 A setpoint without an EEPROM-flags byte", async () => {
 			const fake = new FakeMk2Connection();
 			fake.deviceSwVersion = 1909209;
@@ -178,6 +213,17 @@ describe("v0.4.8 protocol-audit regressions", () => {
 	});
 
 	describe("W0E and W36 validation (#106/#107/#115)", () => {
+		it("invalidates a previous device version on a new sync generation", async () => {
+			const fake = new FakeMk2Connection();
+			const p = protocolWith(fake);
+			p.mk2Model["info.device_sw_version"].value = 1909209;
+			p.mk2Model["info.device_sw_version_text"].value = "19 9 209";
+			fake.generation++;
+			await p.pollStateOnly();
+			expect(p.mk2Model["info.device_sw_version"].value).to.equal(null);
+			expect(p.mk2Model["info.device_sw_version_text"].value).to.equal(null);
+		});
+
 		it("rejects invalid state bytes without opening the stability gate", async () => {
 			const fake = new FakeMk2Connection();
 			fake.currentState = 0xff;
@@ -210,6 +256,20 @@ describe("v0.4.8 protocol-audit regressions", () => {
 			};
 			await expect(p.getRamInfo(0)).to.be.rejectedWith("incomplete response");
 			expect((p as any).ramInfoCache.has(0)).to.equal(false);
+		});
+
+		it("keeps the documented short W36 pair valid after long device identification", async () => {
+			const fake = new FakeMk2Connection();
+			fake.deviceSwVersion = 1909209;
+			fake.longSoftwareVersionResponse = true;
+			const p = protocolWith(fake);
+			await p.loadDeviceInfo();
+			p.conn.communicateMulti = async (_request, decode) => {
+				await decode(mk2Frame(0x57, [0x8e, 0x30, 0x78, 0x8f, 0xcd, 0]));
+			};
+			const info = await p.getRamInfo(8);
+			expect(info.offset).to.equal(205);
+			expect(info.sc).to.equal(0x7830);
 		});
 
 		it("parses long RAM metadata before short triplets when offset-low is 0x8f", async () => {

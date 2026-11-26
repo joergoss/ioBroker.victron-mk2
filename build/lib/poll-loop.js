@@ -19,7 +19,7 @@ class PollLoop {
         if (this.task)
             return;
         this.running = true;
-        this.task = (async () => {
+        const task = (async () => {
             if (delayMs > 0) {
                 await this.delay(delayMs);
             }
@@ -31,6 +31,14 @@ class PollLoop {
                 await this.delay(this.intervalMs);
             }
         })();
+        this.task = task;
+        void task.then(() => {
+            if (this.task === task)
+                this.task = null;
+        }, () => {
+            if (this.task === task)
+                this.task = null;
+        });
     }
     /** Stop scheduling and wait for the in-flight iteration (bounded). */
     async stop(timeoutMs = 3000) {

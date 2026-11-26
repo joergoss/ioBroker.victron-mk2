@@ -226,20 +226,19 @@ class VictronMk2 extends utils.Adapter {
 			}
 
 			if (typeof state === "number" && Math.floor(state / 10) === 2) {
-				// Off must not become a one-way state (review H2): only explicit
-				// power-on controls are forwarded. A full poll is neither needed nor
-				// a safe prerequisite here; on affected firmware its commands can
-				// time out while Off and would otherwise block recovery forever (#83).
-				const offDropped = this.toSendQueue.filter((item) => !controlAllowedWhileOff(item.name));
-				this.toSendQueue = this.toSendQueue.filter((item) => controlAllowedWhileOff(item.name));
+				// Work on an atomic snapshot. New stateChange events must wait for
+				// the next Off cycle instead of entering the already-filtered queue.
+				const pending = this.toSendQueue.splice(0);
+				const offDropped = pending.filter((item) => !controlAllowedWhileOff(item.name));
+				const powerOnControls = pending.filter((item) => controlAllowedWhileOff(item.name));
 				for (const item of offDropped) {
 					const reason = "device is Off: only switch_state/grid_mode writes are allowed";
 					this.log.warn(`${item.name}: ${reason}`);
 					reportControlError(mk2, item, reason);
 					await this.reconcileDroppedControl(item);
 				}
-				const hadPowerOnRequest = this.toSendQueue.length > 0;
-				const needsPowerAssist = this.toSendQueue.some((item) =>
+				const hadPowerOnRequest = powerOnControls.length > 0;
+				const needsPowerAssist = powerOnControls.some((item) =>
 					(item.name === "control.grid_mode" && (item.value === 1 || item.value === 2))
 					|| (item.name === "control.switch_state" && item.value === 2));
 				if (needsPowerAssist) {
@@ -247,7 +246,7 @@ class VictronMk2 extends utils.Adapter {
 					// Read just Flags0 instead of restoring the full-poll dependency.
 					await mk2.get_flags();
 				}
-				await this.processToSendQueue();
+				await this.processToSendQueue(powerOnControls);
 				if (this.modelPopulated) {
 					await this.publishStates();
 				} else {
@@ -307,7 +306,7 @@ class VictronMk2 extends utils.Adapter {
 		if (!this.mk2 || this.unloading) return;
 		await publishModel(this.mk2.mk2Model, async (key, value) => {
 			await this.setStateAsync(key, { val: value, ack: true });
-		}, only);
+		}, only, () => !this.unloading);
 	}
 
 	/** Publish only values actually known before the first successful full poll. */
@@ -335,20 +334,22 @@ class VictronMk2 extends utils.Adapter {
 		await this.publishStates(keys);
 	}
 
-	async processToSendQueue(): Promise<void> {
+	async processToSendQueue(queue: QueueItem[] = this.toSendQueue): Promise<void> {
 		if (!this.mk2 || this.unloading) return;
-		const result = await processControlWritesDetailed(this.mk2, this.toSendQueue, this.log);
+		const result = await processControlWritesDetailed(this.mk2, queue, this.log);
 		if (this.unloading) return;
 		for (const item of result.completed) {
+			if (this.unloading) return;
 			// Acknowledge successful writes; ack=true is never forwarded again, so
 			// this cannot retrigger the control path (review T7).
 			await this.setStateAsync(item.name, { val: item.value, ack: true });
+			if (this.unloading) return;
 			// grid_mode also writes an input-current setpoint. Mirror it into the
 			// control.set_assist command state; otherwise that state keeps an old
 			// value (e.g. 0 A) while the device is actually at 16 A.
 			if (item.name === "control.grid_mode" && this.mk2) {
 				const setpoint = this.mk2.mk2Model["control.set_assist"]?.value;
-				if (typeof setpoint === "number") {
+				if (typeof setpoint === "number" && !this.unloading) {
 					await this.setStateAsync("control.set_assist", { val: setpoint, ack: true });
 				}
 			}
@@ -365,6 +366,7 @@ class VictronMk2 extends utils.Adapter {
 		const actual = this.actualControlValue(item.name);
 		if (actual === undefined) return;
 		const current = await this.getStateAsync(item.name);
+		if (this.unloading) return;
 		if (current && current.ack === false && current.val === item.value) {
 			await this.setStateAsync(item.name, { val: actual, ack: true });
 		}
@@ -379,11 +381,13 @@ class VictronMk2 extends utils.Adapter {
 		if (this.staleControlsChecked || !this.modelPopulated || this.unloading) return;
 		this.staleControlsChecked = true;
 		for (const id of CONTROL_STATE_IDS) {
+			if (this.unloading) return;
 			const state = await this.getStateAsync(id);
+			if (this.unloading) return;
 			if (!state || state.ack !== false) continue;
 			this.log.warn(`control ${id} was written while the adapter was down; not replaying it`);
 			const actual = this.actualControlValue(id);
-			if (actual !== undefined) {
+			if (actual !== undefined && !this.unloading) {
 				await this.setStateAsync(id, { val: actual, ack: true });
 			}
 		}
@@ -405,6 +409,7 @@ class VictronMk2 extends utils.Adapter {
 			} catch {
 				continue;
 			}
+			if (this.unloading) return;
 			if (!info.supported || info.min === null || info.max === null) continue;
 			const min = Math.round(settingDisplayValue(info, info.min) * 1000) / 1000;
 			const max = Math.round(settingDisplayValue(info, info.max) * 1000) / 1000;

@@ -534,4 +534,63 @@ describe("adapter lifecycle", () => {
 		expect(events.slice(events.indexOf("callback") + 1).filter((event) => event.startsWith("state:"))).to.have.length(0);
 		expect(serial.isOpen()).to.equal(false);
 	});
+
+	it("keeps newly injected Off-forbidden controls out of the current queue snapshot", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		adapter.modelPopulated = true;
+		adapter.staleControlsChecked = true;
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		protocol.mk2Model["setting.flag.DisableCharge"].value = true;
+		adapter.mk2 = protocol;
+		adapter.states["control.DisableCharge"] = { val: 0, ack: false };
+		adapter.toSendQueue = [{ name: "control.DisableCharge", value: 0, attempts: 0 }];
+		const originalGetState = adapter.getStateAsync.bind(adapter);
+		let injected = false;
+		adapter.getStateAsync = async (id: string) => {
+			if (!injected && id === "control.DisableCharge") {
+				injected = true;
+				adapter.handlers.stateChange("victron-mk2.0.control.IBatBulk", { val: 100, ack: false });
+			}
+			return originalGetState(id);
+		};
+		await adapter.updateStates();
+		expect(fake.writes).to.have.length(0);
+		expect(adapter.toSendQueue).to.have.length(1);
+		expect(adapter.toSendQueue[0]).to.include({ name: "control.IBatBulk", value: 100 });
+	});
+
+	it("does not begin another state write after a blocked write outlives unload", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const model: Record<string, any> = {
+			"state.state": { value: 20, valueOld: null },
+			"state.substate": { value: 0, valueOld: null },
+		};
+		adapter.mk2 = {
+			mk2Model: model,
+			conn: {
+				beginShutdown: () => undefined,
+				waitForIdle: async () => undefined,
+				shutdown: async () => undefined,
+			},
+		};
+		adapter.pollLoop = { stop: async () => undefined };
+		const events: string[] = [];
+		let release: () => void;
+		const blocker = new Promise<void>((resolve) => { release = resolve; });
+		adapter.setStateAsync = async (id: string) => {
+			events.push(`begin:${id}`);
+			if (id === "state.state") await blocker;
+			events.push(`end:${id}`);
+		};
+		const publishing = adapter.publishStates(["state.state", "state.substate"]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await adapter.handlers.unload(() => events.push("callback"));
+		release!();
+		await publishing;
+		expect(events).to.deep.equal(["begin:state.state", "callback", "end:state.state"]);
+	});
 });

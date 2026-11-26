@@ -98,6 +98,19 @@ class Mk2Connection {
             await sleep(30);
         }
     }
+    /** Open and immediately re-check shutdown so a slow open cannot resurrect the port. */
+    async openPort() {
+        await this.port.open();
+        if (this.closedDown) {
+            try {
+                await this.port.close();
+            }
+            catch (_a) {
+                // best effort; the shutdown error remains authoritative
+            }
+            throw new errors_1.Mk2TransportError("connection is shut down");
+        }
+    }
     /** Open the port and synchronise once; resynchronise after a reconnect. */
     async ensureSynced() {
         if (this.closedDown) {
@@ -107,7 +120,7 @@ class Mk2Connection {
         try {
             if (!this.port.isOpen()) {
                 this.synced = false;
-                await this.port.open();
+                await this.openPort();
             }
             if (!this.synced) {
                 await this.sync();
@@ -145,7 +158,7 @@ class Mk2Connection {
         try {
             this.ve9BitModeSeen = false;
             if (!this.port.isOpen()) {
-                await this.port.open();
+                await this.openPort();
             }
             await this.discardInput();
             const deadline = Date.now() + 5000;
@@ -371,7 +384,8 @@ class Mk2Connection {
             // checksum was already verified over the raw byte.
             frame[0] &= 0x7f;
             if (ledAppended) {
-                if (!this.isSupportedInFrameLedLayout(frame) || this.hasLegacyExternalLedBlock()) {
+                if (!this.isSupportedInFrameLedLayout(frame)
+                    || await this.hasLegacyExternalLedBlock(frame[1] === 0xff && frame[2] === 0x53 ? 0 : 30)) {
                     await this.fail("protocol", "Unsupported LED-appended frame layout");
                 }
                 frame = this.removeInFrameLedStatus(frame);
@@ -384,11 +398,18 @@ class Mk2Connection {
     /** Pull already available trailing bytes into the accumulator and detect the
      * distinct legacy external `L on blink` block before stripping in-frame LEDs.
      */
-    hasLegacyExternalLedBlock() {
-        const trailing = this.port.readAvailable();
-        if (trailing)
-            this.rxBuffer = Buffer.concat([this.rxBuffer, trailing]);
-        return this.rxBuffer.length > 0 && this.rxBuffer[0] === 0x4c;
+    async hasLegacyExternalLedBlock(graceMs) {
+        const deadline = Date.now() + graceMs;
+        while (true) {
+            const trailing = this.port.readAvailable();
+            if (trailing)
+                this.rxBuffer = Buffer.concat([this.rxBuffer, trailing]);
+            if (this.rxBuffer.length > 0)
+                return this.rxBuffer[0] === 0x4c;
+            if (Date.now() >= deadline)
+                return false;
+            await sleep(2);
+        }
     }
     /** Validate the documented in-frame LED layout before stripping payload bytes. */
     isSupportedInFrameLedLayout(frame) {

@@ -20,7 +20,9 @@
  * MK2_PORT and MK2_ACCEPTANCE_OUT override the default port and JSON report
  * path (/tmp/mk2-write-acceptance.json). With MK2_VALIDATE_EEPROM_FREE=1 the
  * first AC1 write also exercises prepareSettingWrite and asserts on-wire that
- * its short FlagsExt0 S form contains no EEPROM-flags byte.
+ * its short FlagsExt0 S form contains no EEPROM-flags byte. The same opt-in
+ * also clears the confirmed-setpoint cache after the 0 A step and verifies a
+ * cold 0 A -> 3.1 A transition before restoring 5 A.
  */
 'use strict';
 
@@ -160,6 +162,12 @@ async function main() {
         console.log('SKIP switch_state 1 charger only: incompatible with DisableCharge=true');
 
         await step('set_assist 0 A', () => p.set_assist(0), 0);
+        if (validateEepromFree) {
+            // Simulate a reconnect only in this process. The real device stays
+            // in special 0 A mode; 3.1 A must prove On + grid before success.
+            p.confirmedInputCurrentSetpoint = null;
+            await step('set_assist 3.1 A from cold 0 A', () => p.set_assist(3.1), 3.1);
+        }
         await step('set_assist restore 5 A', () => p.set_assist(5), 5);
 
         await step('DisableCharge same value 1 (no EEPROM change)', () => p.set_flagDisableCharge(1), 1);

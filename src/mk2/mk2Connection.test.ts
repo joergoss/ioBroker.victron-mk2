@@ -359,6 +359,24 @@ describe("sync split robustness (issue #56)", () => {
 });
 
 describe("shutdown (issue #59)", () => {
+	it("closes a slow open that completes after shutdown began (#122)", async () => {
+		class SlowOpenSerial extends FakeMk2Serial {
+			async open(): Promise<void> {
+				await new Promise((resolve) => setTimeout(resolve, 20));
+				return super.open();
+			}
+		}
+		const fake = new SlowOpenSerial();
+		const conn = connWith(fake);
+		const pending = conn.ensureSynced();
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		conn.beginShutdown();
+		await conn.shutdown();
+		await expect(pending).to.be.rejectedWith("shut down");
+		expect(fake.isOpen()).to.equal(false);
+		expect(fake.openCount).to.equal(1);
+	});
+
 	it("does not reopen the port after shutdown", async () => {
 		const fake = new FakeMk2Serial();
 		fake.push(versionFrame());
@@ -478,6 +496,16 @@ describe("appended LED status (issue #67)", () => {
 			expect(collector.info.min).to.equal(0);
 			expect(collector.info.max).to.equal(120);
 		}
+	});
+
+	it("rejects a legacy external LED block that arrives after the base frame", async () => {
+		const base = Buffer.from("8f4110000000041f00a0006400300000c9", "hex");
+		const fake = new FakeMk2Serial();
+		fake.push(base);
+		setTimeout(() => fake.push(Buffer.from([0x4c, 0x01, 0x00])), 20);
+		const conn = connWith(fake);
+		await expect(conn.receiveFrame(200)).to.be.rejectedWith("Unsupported LED-appended frame layout");
+		expect(conn.protocolErrors).to.equal(1);
 	});
 
 	it("normalizes documented LED appends on standard responses (#113)", async () => {

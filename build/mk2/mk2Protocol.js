@@ -82,6 +82,8 @@ class Mk2Protocol {
         this.ramInfoCache.clear();
         this.unsupportedRam.clear();
         this.deviceInfoLoaded = false;
+        this.mk2Model["info.device_sw_version"].value = null;
+        this.mk2Model["info.device_sw_version_text"].value = null;
         this.longWinmonFrames = false;
         this.shortWinmonForWrites = false;
         this.confirmedInputCurrentSetpoint = null;
@@ -490,15 +492,8 @@ class Mk2Protocol {
             const stateValue = this.mk2Model["state.state"].value;
             const mainState = typeof stateValue === "number" ? Math.floor(stateValue / 10) : 0;
             const version = this.mk2Model["info.device_sw_version"].value;
-            // Captured 1909209 frames have a reserved 0x10 block, fixed candidate
-            // 0x00/0x32 and an intermediate 0x00/0x80 byte. This signature also
-            // covers Off recovery before W05/W06 identification is available.
-            const observed1909209Shape = len === 0x0f && response[2] === 0x10
-                && (fixedRegister === 0x00 || fixedRegister === 0x32)
-                && (response[14] === 0x00 || response[14] === 0x80);
             const versionUnknown = typeof version !== "number" || version <= 0;
-            const known1909209Layout = len === 0x0f && (version === 1909209
-                || (versionUnknown && observed1909209Shape && mainState >= 0 && mainState <= 2));
+            const known1909209Layout = len === 0x0f && version === 1909209;
             const unknownExtendedLayout = len === 0x0f && !known1909209Layout && versionUnknown;
             let switch_register = known1909209Layout ? trailingRegister : fixedRegister;
             let switchRegisterTrusted = true;
@@ -637,6 +632,20 @@ class Mk2Protocol {
             throw new errors_1.Mk2ValidationError(`${context}: no unambiguous current F5 switch state; refusing to send S`);
         }
     }
+    hasAmbiguousMinimumForPositive(raw) {
+        if (raw <= 0)
+            return false;
+        const limit = this.mk2Model["assist.limit"].value;
+        if (typeof limit !== "number" || Math.abs(limit * 10 - raw) > 0.01)
+            return false;
+        if (this.confirmedInputCurrentSetpoint === 0)
+            return true;
+        const encoded = this.mk2Model["state.state"].value;
+        const mainState = typeof encoded === "number" ? Math.floor(encoded / 10) : null;
+        const minimum = this.mk2Model["assist.minlimit"].value;
+        return mainState !== null && mainState >= 4 && mainState <= 6
+            && typeof minimum === "number" && Math.abs(limit * 10 - minimum * 10) <= 0.01;
+    }
     normalizeAssistLimit(ampere, context) {
         if (!Number.isFinite(ampere) || ampere < 0) {
             throw new errors_1.Mk2ValidationError(`${context}: invalid value ${ampere}`);
@@ -670,8 +679,6 @@ class Mk2Protocol {
     // Set the ampere level for PowerAssist. explicitMode is used only by
     // grid_mode, which deliberately chooses the outgoing panel state itself.
     async set_assist(ampere, explicitMode = false) {
-        const previousConfirmed = this.confirmedInputCurrentSetpoint;
-        const previousEffective = this.mk2Model["assist.limit"].value;
         const normalized = this.normalizeAssistLimit(ampere, "set_assist");
         ampere = normalized.ampere;
         const a = normalized.raw;
@@ -687,8 +694,7 @@ class Mk2Protocol {
         if (ampere === 0 && this.currentSwitchState === 1) {
             this.log.debug("set_assist: 0 A selects Invert with PowerAssist, including from Charger only (§5 note 3)");
         }
-        const minimumCollision = previousConfirmed === 0 && ampere > 0
-            && typeof previousEffective === "number" && Math.abs(previousEffective * 10 - a) < 0.01;
+        const minimumCollision = this.hasAmbiguousMinimumForPositive(a);
         const data = Buffer.from([this.currentSwitchState, a & 0xFF, (a >> 8) & 0xFF, 0x01, 0x80]);
         this.log.debug("******   set_assist");
         this.confirmedInputCurrentSetpoint = null;
@@ -740,6 +746,7 @@ class Mk2Protocol {
             throw new errors_1.Mk2ValidationError("set_switch_state: input-current limit is unavailable in DMC-dedicated mode (§6.2)");
         }
         const data = Buffer.from([state, limit & 0xFF, (limit >> 8) & 0xFF, 0x01, 0x80]);
+        const minimumCollision = limit > 0 && limit < 0x8000 && this.hasAmbiguousMinimumForPositive(limit);
         if (limit < 0x8000) {
             this.confirmedInputCurrentSetpoint = null;
         }
@@ -747,7 +754,7 @@ class Mk2Protocol {
         // The S frame is only an acknowledgement. Verify the effective state
         // through bounded W0E/F5 readback; live transitions can take several seconds.
         // State 2 also requires the documented Invert main state, not just panel bits.
-        await this.waitForSwitchState(state, "set_switch_state", state === 2 ? [4, 5, 6] : undefined, state === 2 ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs, limit < 0x8000 ? limit : undefined);
+        await this.waitForSwitchState(state, "set_switch_state", state === 2 ? [4, 5, 6] : minimumCollision ? (state === 1 ? [8, 9] : [7, 8, 9]) : undefined, state === 2 || minimumCollision ? this.gridModeReadbackTimeoutMs : this.switchReadbackTimeoutMs, limit < 0x8000 ? limit : undefined);
         if (limit < 0x8000) {
             this.confirmedInputCurrentSetpoint = limit / 10;
         }
@@ -1175,10 +1182,14 @@ class Mk2Protocol {
                 }
                 throw new Error("getRamInfo: incomplete scale response");
             }
+            // The documented short pair remains valid in long mode. Check its
+            // command shape before the flat mode-2 layout (#107/#115).
+            const shortPair = response[0] === 0x08 && response[3] === 0x8e && response[6] === 0x8f;
             // Mode 2 is flat: 0x8E ScLo ScHi OffsetLo OffsetHi. Detect it
-            // before short triplets so payload 0x8F is never a command (#115).
-            const longResponse = response[3] === 0x8e && response[0] >= 0x07
-                && (longMode || (response[0] === 0x07 && response.length === 9));
+            // before other triplets so payload 0x8F is never a command.
+            const longResponse = !shortPair && response[3] === 0x8e && response[0] >= 0x07
+                && ((response[0] === 0x07 && response.length === 9)
+                    || (longMode && (response[0] - 2) % 3 !== 0));
             if (longResponse) {
                 const rawSc = response[4] | (response[5] << 8);
                 const rawOffset = response[6] | (response[7] << 8);

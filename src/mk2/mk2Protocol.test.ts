@@ -265,8 +265,8 @@ describe("Mk2Protocol control writes", () => {
 		const p = protocolWith(fake);
 		p.switchReadbackTimeoutMs = 300;
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
-		p.mk2Model["info.device_sw_version"].value = 1909209;
 		await p.pollStateOnly();
+		p.mk2Model["info.device_sw_version"].value = 1909209;
 		await p.master_multi_led_info();
 
 		await p.set_grid_mode(2);
