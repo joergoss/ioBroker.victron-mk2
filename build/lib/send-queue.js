@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.reportControlError = reportControlError;
 exports.processControlWrites = processControlWrites;
 exports.processControlWritesDetailed = processControlWritesDetailed;
 exports.processToSendQueue = processToSendQueue;

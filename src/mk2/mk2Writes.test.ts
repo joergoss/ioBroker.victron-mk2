@@ -47,6 +47,9 @@ describe("set_assist readback", () => {
 		fake.limit = 16;
 		fake.ignoreAssistWrites = true;
 		const p = protocolWith(fake);
+		p.switchReadbackTimeoutMs = 20;
+		p.switchReadbackPollIntervalMs = 1;
+		await p.master_multi_led_info();
 
 		await expect(p.set_assist(10)).to.be.rejectedWith("readback mismatch");
 	});
@@ -130,6 +133,7 @@ describe("long Winmon firmware writes (1909209)", () => {
 		fake.rejectLegacyWritesInLongMode = true;
 		const p = protocolWith(fake);
 		await p.loadDeviceInfo();
+		await p.master_multi_led_info();
 		await p.writeSetting(0, 0x89f0);
 		expect(fake.shortWinmonCompatibility).to.equal(true);
 		expect(fake.flags0).to.equal(0x89f0);
@@ -141,9 +145,9 @@ describe("long Winmon firmware writes (1909209)", () => {
 		expect(writeIndex).to.be.greaterThan(modeIndex);
 		const modeRequest = fake.requests[modeIndex];
 		expect(modeRequest[3]).to.equal(3);
-		expect(modeRequest[4]).to.equal(0xff);
-		expect(modeRequest[5]).to.equal(0xff);
-		expect(modeRequest[10]).to.equal(0x00);
+		expect(modeRequest[4] | (modeRequest[5] << 8)).to.equal(160);
+		expect(modeRequest[9]).to.equal(0x01);
+		expect(modeRequest).to.have.length(11); // no EEPROM-flags byte
 	});
 
 	it("keeps Inverter only when a setting write follows grid_mode=2 (issue #100)", async () => {
@@ -222,9 +226,12 @@ describe("long Winmon firmware writes (1909209)", () => {
 		fake.longSoftwareVersionResponse = true;
 		fake.longSettingInfoResponse = true;
 		const p = protocolWith(fake);
-		p.currentSwitchState = 2;
+		fake.switchState = 2;
+		fake.switchRegister = 0b00100000;
+		fake.currentState = 4;
 		p.mk2Model["setting.flag.AssistEnabled"].value = false;
 		await p.loadDeviceInfo();
+		await p.master_multi_led_info();
 		fake.requests.length = 0;
 		await expect(p.writeSetting(0, 0x89f0)).to.be.rejectedWith("PowerAssist");
 		expect(fake.requests.filter((r) => r[2] == 0x53).length).to.equal(0);

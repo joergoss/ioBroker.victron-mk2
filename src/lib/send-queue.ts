@@ -19,7 +19,7 @@ export interface QueueResult {
 
 /** Record a dropped/failed control write in the model, so "pending" and
  * "discarded" are distinguishable from the outside (review N7). */
-function reportControlError(mk2: Mk2Protocol, item: QueueItem, reason: string): void {
+export function reportControlError(mk2: Mk2Protocol, item: QueueItem, reason: string): void {
 	const entry = mk2.mk2Model["diag.last_control_error"];
 	if (entry) {
 		entry.value = `${item.name}: ${reason}`;

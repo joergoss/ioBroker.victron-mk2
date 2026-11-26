@@ -17,6 +17,19 @@ function connWith(fake: FakeMk2Serial): Mk2Connection {
 	return new Mk2Connection("fake", log as any, fake as any);
 }
 
+/** Add the two documented in-frame LED bytes and rebuild the checksum. */
+function withInFrameLeds(base: Buffer, on = 1, blink = 0): Buffer {
+	const out = Buffer.alloc(base.length + 2);
+	out[0] = (base[0] + 2) | 0x80;
+	base.copy(out, 1, 1, base.length - 1);
+	out[out.length - 3] = on;
+	out[out.length - 2] = blink;
+	let sum = 0;
+	for (const b of out.subarray(0, -1)) sum += b;
+	out[out.length - 1] = (256 - (sum % 256)) & 0xff;
+	return out;
+}
+
 /** Fake port that keeps a trailing block in flight until the base frame was read. */
 class DelayedBlockSerial extends FakeMk2Serial {
 	blockReleased = false;
@@ -465,6 +478,35 @@ describe("appended LED status (issue #67)", () => {
 			expect(collector.info.min).to.equal(0);
 			expect(collector.info.max).to.equal(120);
 		}
+	});
+
+	it("normalizes documented LED appends on standard responses (#113)", async () => {
+		const dc = veBusFrame(0x20, [0, 0, 0, 0, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, 20], 0x0f);
+		const ac = veBusFrame(0x20, [1, 1, 0, 8, 8, 0, 0, 0, 0, 0, 0, 0, 0, 20], 0x0f);
+		const f5 = veBusFrame(0x41, [0x10, 0, 0, 0, 4, 0x1f, 0, 0xa0, 0, 0x64, 0, 0x30], 0x0d);
+		const cases = [
+			mk2Frame(0x41, [1, 0]),
+			mk2Frame(0x4c, [1, 0]),
+			mk2Frame(0x57, [0x94, 8, 0]),
+			dc,
+			ac,
+			f5,
+		];
+		for (const base of cases) {
+			const fake = new FakeMk2Serial();
+			fake.push(withInFrameLeds(base));
+			const conn = connWith(fake);
+			const result = await conn.receiveFrame(100);
+			expect(result.equals(base), `frame ${base.toString("hex")}`).to.equal(true);
+		}
+	});
+
+	it("normalizes the exact LED-appended L frame from the audit (#113)", async () => {
+		const fake = new FakeMk2Serial();
+		fake.push(Buffer.from("86ff4c010001002d", "hex"));
+		const conn = connWith(fake);
+		const result = await conn.receiveFrame(100);
+		expect(result.toString("hex")).to.equal("04ff4c0100b0");
 	});
 });
 

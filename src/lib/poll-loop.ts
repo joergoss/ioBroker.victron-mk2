@@ -45,15 +45,20 @@ export class PollLoop {
 			this.wakeUp = null;
 		}
 		if (this.task) {
+			const task = this.task;
+			let settled = false;
+			void task.then(() => { settled = true; }, () => { settled = true; });
 			let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 			const timeout = new Promise<void>((resolve) => {
 				timeoutTimer = setTimeout(resolve, timeoutMs);
 			});
-			await Promise.race([this.task, timeout]);
+			await Promise.race([task, timeout]);
 			if (timeoutTimer) {
 				clearTimeout(timeoutTimer);
 			}
-			this.task = null;
+			// A timeout is not task completion. Keep the reference so start()
+			// cannot create a second loop beside the still-finishing task (#122).
+			if (settled) this.task = null;
 		}
 	}
 

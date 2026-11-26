@@ -2,6 +2,32 @@
 
 All notable changes to this adapter are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## Unreleased
+
+### Fixed
+
+- **S-command safety and exact readback**: current-limit writes now require a
+  proven F5 switch state, compare the exact raw deciamp value actually sent and
+  distinguish special 0 A from a device-minimum readback. Generic F5 trailing
+  bytes no longer replace the documented switch register, while the captured
+  1909209 layout remains supported, including Off recovery before firmware
+  identification (#108, #109, #110, #119).
+- **Long-Winmon setting writes**: cold 0 A setpoints are preserved after
+  restart/reconnect. The preparatory S frame no longer carries an EEPROM-flags
+  byte and is itself read back before W33/W34. Unsupported pre-reads and
+  explicit 0x80 rejections do not cause setting writes/retries; same-value
+  avoidance now refreshes model values (#105, #111, #112, #114, #116).
+- **Protocol decoding**: W0E state values are validated, W36 supports complete
+  split-frame and long-form metadata without inventing offsets or misreading
+  payload 0x8F, AC signedness follows RAM metadata, scaled period offsets are
+  honored, and standard in-frame LED appends are normalized (#106, #107, #113,
+  #115, #117).
+- **Adapter lifecycle and metadata**: unknown AC1 configuration no longer
+  creates a maximum-current default, Off-dropped controls report/reconcile
+  their outcome, oversized poll intervals are rejected, and shutdown cancels
+  active work without post-unload state writes (#118, #120, #121, #122).
+
 ## 0.4.8 (2026-11-26)
 
 ### Fixed

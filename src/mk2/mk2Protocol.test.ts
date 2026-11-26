@@ -75,6 +75,7 @@ describe("Mk2Protocol control writes", () => {
 	it("set_assist uses the current switch state and updates the limit", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);
+		await p.master_multi_led_info();
 		await p.set_assist(10);
 		expect(fake.switchState).to.equal(3);
 		expect(fake.limit).to.equal(10);
@@ -264,6 +265,7 @@ describe("Mk2Protocol control writes", () => {
 		const p = protocolWith(fake);
 		p.switchReadbackTimeoutMs = 300;
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		p.mk2Model["info.device_sw_version"].value = 1909209;
 		await p.pollStateOnly();
 		await p.master_multi_led_info();
 
@@ -293,6 +295,7 @@ describe("Mk2Protocol control writes", () => {
 		p.gridModeReadbackTimeoutMs = 500;
 		p.switchReadbackPollIntervalMs = 5;
 		p.mk2Model["setting.flag.AssistEnabled"].value = true;
+		await p.master_multi_led_info();
 		await p.set_assist(0);
 		expect(fake.limit).to.equal(0);
 		expect(p.mk2Model["state.state"].value).to.equal(40);
@@ -466,6 +469,7 @@ describe("Mk2Protocol control writes", () => {
 	it("set_grid_mode grid keeps the current limit when nothing is configured (issue #70)", async () => {
 		const fake = new FakeMk2Connection();
 		const p = protocolWith(fake);
+		await p.master_multi_led_info();
 		await p.set_assist(5);
 		p.mk2Model["setting.IMainsLimitAC1"].value = null;
 		await p.master_multi_led_info(); // actual limit is now 5 A

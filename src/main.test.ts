@@ -2,7 +2,9 @@ import { expect } from "chai";
 import proxyquire from "proxyquire";
 import { Mk2ValidationError } from "./lib/errors";
 import { Mk2Protocol } from "./mk2/mk2Protocol";
-import { asConnection, FakeMk2Connection } from "./test-utils/fake-mk2";
+import { asConnection, FakeMk2Connection, FakeMk2Serial, versionFrame } from "./test-utils/fake-mk2";
+import { Mk2Connection } from "./mk2/mk2Connection";
+import { PollLoop } from "./lib/poll-loop";
 
 /**
  * Adapter lifecycle tests with a stubbed ioBroker runtime. No hardware and no
@@ -453,5 +455,83 @@ describe("adapter lifecycle", () => {
 		expect(adapter.states["info.connection"].val).to.equal(false);
 		expect(adapter.states["diag.protocol_errors"].val).to.equal(2);
 		expect(adapter.states["diag.sync_errors"].val).to.equal(3);
+	});
+
+	it("never defaults set_assist to the device maximum when AC1 is unknown (#118)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(new FakeMk2Connection()));
+		adapter.mk2 = protocol;
+		protocol.mk2Model["assist.maxlimit"].value = 32;
+		protocol.mk2Model["setting.IMainsLimitAC1"].value = null;
+		await adapter.updateAssistLimitObject();
+		expect(adapter.objects["control.set_assist"].common).to.include({ min: 0, max: 32 });
+		expect(adapter.objects["control.set_assist"].common.def).to.equal(null);
+
+		protocol.mk2Model["setting.IMainsLimitAC1"].value = 5;
+		await adapter.updateAssistLimitObject();
+		expect(adapter.objects["control.set_assist"].common.def).to.equal(5);
+		protocol.mk2Model["setting.IMainsLimitAC1"].value = 7;
+		await adapter.updateAssistLimitObject();
+		expect(adapter.objects["control.set_assist"].common.def).to.equal(7);
+	});
+
+	it("does not acknowledge a dropped positive request from the old 0 A minimum (#119)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		adapter.modelPopulated = true;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(new FakeMk2Connection()));
+		adapter.mk2 = protocol;
+		protocol.mk2Model["state.state"].value = 40;
+		protocol.mk2Model["assist.minlimit"].value = 3.1;
+		protocol.mk2Model["assist.limit"].value = 3.1;
+		expect(adapter.actualControlValue("control.set_assist")).to.equal(undefined);
+		expect(adapter.actualControlValue("control.grid_mode")).to.equal(undefined);
+	});
+
+	it("reports and reconciles controls dropped by the Off filter (#120)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		adapter.modelPopulated = true;
+		adapter.staleControlsChecked = true;
+		const fake = new FakeMk2Connection();
+		fake.currentState = 2;
+		fake.switchState = 4;
+		fake.switchRegister = 0;
+		const protocol = new Mk2Protocol("fake", adapter.log, asConnection(fake));
+		protocol.mk2Model["setting.flag.DisableCharge"].value = true;
+		adapter.mk2 = protocol;
+		adapter.states["control.DisableCharge"] = { val: 0, ack: false };
+		adapter.toSendQueue = [{ name: "control.DisableCharge", value: 0, attempts: 0 }];
+		await adapter.updateStates();
+		expect(fake.writes).to.have.length(0);
+		expect(adapter.states["control.DisableCharge"]).to.include({ val: 1, ack: true });
+		expect(adapter.states["diag.last_control_error"].val).to.contain("device is Off");
+	});
+
+	it("clamps an oversized interval instead of overflowing the timer (#121)", async () => {
+		const adapter = createAdapter({ portPath: "", interval: 2_147_483.648 });
+		await adapter.handlers.ready();
+		expect(adapter.config.interval).to.equal(2);
+	});
+
+	it("cancels serial work and emits no states after the unload callback (#122)", async () => {
+		const adapter = createAdapter({ portPath: "/dev/null", interval: 3600 });
+		const serial = new FakeMk2Serial();
+		serial.push(versionFrame());
+		const conn = new Mk2Connection("fake", adapter.log, serial as any);
+		conn.responseTimeoutMs = 10000;
+		adapter.mk2 = new Mk2Protocol("fake", adapter.log, conn);
+		const events: string[] = [];
+		const originalSetState = adapter.setStateAsync.bind(adapter);
+		adapter.setStateAsync = async (id: string, state: any) => {
+			events.push(`state:${id}`);
+			return originalSetState(id, state);
+		};
+		adapter.pollLoop = new PollLoop(() => adapter.updateStates(), 1000);
+		adapter.pollLoop.start(0);
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		await adapter.handlers.unload(() => events.push("callback"));
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		expect(events.indexOf("callback")).to.be.greaterThanOrEqual(0);
+		expect(events.slice(events.indexOf("callback") + 1).filter((event) => event.startsWith("state:"))).to.have.length(0);
+		expect(serial.isOpen()).to.equal(false);
 	});
 });
