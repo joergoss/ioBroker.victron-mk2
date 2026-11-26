@@ -247,9 +247,8 @@ class Mk2Connection {
      *
      * The MK2 packs up to three 3-byte Winmon frames into one MK2 frame, so a
      * command like CommandGetSettingInfo (five responses) arrives as several MK2
-     * frames. `decode` returns true once the answer is complete. The legacy
-     * `allowQuietEnd` option is ignored: transport failures always propagate,
-     * including after a partial response (issue #92).
+     * frames. `decode` returns true once the answer is complete. Transport
+     * failures always propagate, including after a partial response (issue #92).
      */
     async communicateMulti(request, decode, options = {}) {
         // A busy flag plus an await is not a mutex (review T13). Queue every

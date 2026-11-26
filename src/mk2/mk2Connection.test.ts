@@ -459,7 +459,7 @@ describe("transport error boundaries (issues #89, #91, #92)", () => {
 		await expect(conn.communicateMulti(
 			mk2Frame(0x57, [0x35, 2, 0]),
 			async () => false,
-			{ allowQuietEnd: true, readTimeoutMs: 40 },
+			{ readTimeoutMs: 40 },
 		)).to.be.rejectedWith("Timeout");
 		expect(conn.synced).to.equal(false);
 		expect(conn.timeouts).to.equal(1);
@@ -522,7 +522,7 @@ describe("transport error boundaries (issues #89, #91, #92)", () => {
 			await expect(conn.communicateMulti(
 				mk2Frame(0x57, [0x35, 2, 0]),
 				async () => false,
-				{ allowQuietEnd: true, readTimeoutMs: 200 },
+				{ readTimeoutMs: 200 },
 			)).to.be.rejectedWith(kind === "checksum" ? "checksum" : "length 0");
 			expect(conn.synced).to.equal(false);
 			expect(kind === "checksum" ? conn.checksumErrors : conn.protocolErrors).to.equal(1);

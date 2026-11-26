@@ -469,7 +469,7 @@ export class FakeMk2Connection {
 	async communicateMulti(
 		request: Buffer,
 		decode: (response: Buffer) => Promise<boolean>,
-		_options: { allowQuietEnd?: boolean; readTimeoutMs?: number } = {},
+		_options: { readTimeoutMs?: number } = {},
 	): Promise<void> {
 		this.before(request);
 		for (const frame of this.respond(request)) {
