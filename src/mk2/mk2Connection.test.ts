@@ -377,6 +377,22 @@ describe("appended LED status (issue #67)", () => {
 		const second = await conn.receiveFrame(200);
 		expect(second[2]).to.equal(0x41); // the LED block must not be a response
 	});
+
+	it("normalizes the documented in-frame LED append without waiting (issue #88)", async () => {
+		// Appendix 1: 84 FF 'S' <LED-on> <LED-blink> <Checksum>.
+		const frame = Buffer.from([0x84, 0xff, 0x53, 0x01, 0x00, 0x00]);
+		let sum = 0;
+		for (const b of frame.subarray(0, -1)) sum += b;
+		frame[frame.length - 1] = (256 - (sum % 256)) & 0xff;
+		const fake = new FakeMk2Serial();
+		fake.push(frame);
+		const conn = connWith(fake);
+		const start = Date.now();
+		const result = await conn.receiveFrame(200);
+		expect(Date.now() - start).to.be.lessThan(80);
+		expect(result[0]).to.equal(2); // base S response without LED bytes
+		expect(result[2]).to.equal(0x53);
+	});
 });
 
 describe("transport error boundaries (issues #89, #91, #92)", () => {

@@ -349,46 +349,62 @@ class Mk2Connection {
             if (this.rxBuffer.length < needed) {
                 await this.fail("timeout", "Timeout while receiving complete MK2 frame");
             }
-            const frame = this.rxBuffer.slice(0, needed);
+            let frame = this.rxBuffer.slice(0, needed);
             if (!this.checksum(frame)) {
                 await this.fail("checksum", "MK2 frame checksum error");
             }
             this.rxBuffer = this.rxBuffer.slice(needed);
-            if (ledAppended) {
-                // The appended LED block is not a response to the next command (N12).
-                await this.discardAppendedLedStatus(deadline);
-            }
             this.frame_debug("RECV <-", frame);
             // Bit 7 is LED-append framing metadata, not part of the protocol
             // length. Mask it before handing the frame to the decoders; the
             // checksum was already verified over the raw byte.
             frame[0] &= 0x7f;
+            if (ledAppended) {
+                // Appendix 1 carries LED on/blink inside the checksummed frame.
+                // Consume an immediately buffered legacy external L block when
+                // present, otherwise strip the in-frame bytes without waiting (#88).
+                if (!this.discardAppendedLedStatus()) {
+                    if (frame.length < 5) {
+                        await this.fail("protocol", "LED-appended frame too short");
+                    }
+                    frame = this.removeInFrameLedStatus(frame);
+                }
+            }
             return frame;
         }
         await this.fail("timeout", "Timeout waiting for MK2 frame");
         throw new Error("unreachable");
     }
-    /** Drop an appended 'L' <on> <blink> block after a frame with the LED bit. */
-    async discardAppendedLedStatus(deadline) {
-        // Use a small independent grace window: the frame may have arrived late,
-        // so the caller's deadline can already be exhausted.
-        const graceEnd = Math.min(deadline, Date.now() + 100);
-        while (this.rxBuffer.length < 4 && Date.now() < graceEnd) {
-            const chunk = this.port.read(4 - this.rxBuffer.length);
-            if (chunk) {
-                this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
-            }
-            else {
-                await sleep(5);
-            }
+    /** Consume an immediately buffered legacy external L block, if present. */
+    discardAppendedLedStatus() {
+        // Pull bytes already buffered by the driver, but never wait for a late
+        // external block: the documented in-frame variant needs no grace delay.
+        const chunk = this.port.readAvailable();
+        if (chunk) {
+            this.rxBuffer = Buffer.concat([this.rxBuffer, chunk]);
         }
         if (this.rxBuffer.length >= 3 && this.rxBuffer[0] == 0x4c) {
             // Older firmware appends a trailing 0x00 that would otherwise be
             // read as the next frame length (0 -> protocol error).
             const consume = this.rxBuffer.length >= 4 && this.rxBuffer[3] == 0x00 ? 4 : 3;
-            this.log.debug("discarding appended LED status frame");
+            this.log.debug("discarding external LED status block");
             this.rxBuffer = this.rxBuffer.slice(consume);
+            return true;
         }
+        return false;
+    }
+    /** Strip the documented in-frame LED on/blink bytes and rebuild the base frame. */
+    removeInFrameLedStatus(frame) {
+        const ledOn = frame[frame.length - 3];
+        const ledBlink = frame[frame.length - 2];
+        const base = Buffer.concat([frame.subarray(0, -3), frame.subarray(-1)]);
+        base[0] = (base[0] - 2) & 0x7f;
+        let sum = 0;
+        for (const byte of base.subarray(0, -1))
+            sum += byte;
+        base[base.length - 1] = (256 - (sum % 256)) & 0xff;
+        this.log.debug(`in-frame LED status: on=0x${ledOn.toString(16)}, blink=0x${ledBlink.toString(16)}`);
+        return base;
     }
     /**
      * Count the failure and invalidate the connection. A timeout or checksum
